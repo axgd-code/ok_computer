@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# If the user runs this script with 'sh' (POSIX shell) it may fail due to Bash-only features
+# like process-substitution and 'mapfile'. Detect that and print an actionable message.
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script requires Bash. Run with: bash $0 [--db path]" >&2
+    exit 2
+fi
+
 set -euo pipefail
 
 # Extract Wi‑Fi profiles from macOS Keychain and import them into a KeePassXC database
@@ -28,11 +35,11 @@ usage() {
 ${BLUE}Usage:${NC} bash wifi_from_keychain.sh --db <file.kdbx> [--group "Wi-Fi"] [--key-file path] [--dry-run]
 
 This script reads Wi‑Fi SSIDs stored in the macOS Keychain and adds entries to a KeePassXC
-database using `keepassxc-cli`.
+database using 'keepassxc-cli'.
 
 Prerequisites:
-  - macOS `security` tool (built-in)
-  - `keepassxc-cli` installed and available in PATH
+  - macOS 'security' tool (built-in)
+  - 'keepassxc-cli' installed and available in PATH
   - Target KeePassXC DB already exists and is writable
 
 The KeePassXC entry created will use:
@@ -40,8 +47,8 @@ The KeePassXC entry created will use:
   - Password = Wi‑Fi key
   - Comment = "imported from macOS keychain"
 
-If `--db` is not provided, the script will use `WIFI_KDBX_DB` from `.env.local` if present.
-If `--key-file` is not provided, the script will use `WIFI_KDBX_KEY_FILE` from `.env.local` if present.
+If '--db' is not provided, the script will use 'WIFI_KDBX_DB' from '.env.local' if present.
+If '--key-file' is not provided, the script will use 'WIFI_KDBX_KEY_FILE' from '.env.local' if present.
 
 EOF
 }
