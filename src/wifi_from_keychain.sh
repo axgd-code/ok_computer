@@ -97,16 +97,28 @@ add_entry_to_kp() {
     fi
     
     # Construct the command array
-    local cmd=(keepassxc-cli add "${DB_FILE}" "${GROUP}" "${ssid}" --username "" --password "${pw}" --comment "imported from macOS keychain")
+    local cmd=(keepassxc-cli add "${DB_FILE}" "${GROUP}/${ssid}" --username "" --password-prompt)
     if [ -n "${KEY_FILE}" ]; then
-        cmd=(keepassxc-cli add --key-file "${KEY_FILE}" "${DB_FILE}" "${GROUP}" "${ssid}" --username "" --password "${pw}" --comment "imported from macOS keychain")
+        cmd=(keepassxc-cli add --key-file "${KEY_FILE}" "${DB_FILE}" "${GROUP}/${ssid}" --username "" --password-prompt)
     fi
 
     # Execute with password pipe if KEEPASS_DB_PASS is set, otherwise interactive
+    local output
     if [ -n "${KEEPASS_DB_PASS:-}" ]; then
-        echo "${KEEPASS_DB_PASS}" | "${cmd[@]}"
+        if output=$(printf "%s\n%s\n" "${KEEPASS_DB_PASS}" "${pw}" 2>&1 | "${cmd[@]}" 2>&1); then
+            return 0
+        else
+            log_err "keepassxc-cli error: ${output}"
+            return 1
+        fi
     else
-        "${cmd[@]}"
+        log "Enter KeePassXC database password, then Wi-Fi password for ${ssid}:"
+        if output=$(printf "%s\n" "${pw}" 2>&1 | "${cmd[@]}" 2>&1); then
+            return 0
+        else
+            log_err "keepassxc-cli error: ${output}"
+            return 1
+        fi
     fi
 }
 

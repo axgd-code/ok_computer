@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Ensure running under Bash (required for mapfile, process substitution, arrays)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script requires Bash. Run with: bash $0" >&2
+    exit 2
+fi
+
 set -euo pipefail
 
 # Import Wi-Fi profiles from a KeePassXC database (kdbx) using keepassxc-cli.
