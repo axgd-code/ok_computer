@@ -22,40 +22,23 @@ async function loadEnv() {
     const container = document.getElementById('env-form');
     container.innerHTML = '';
     
-    // If API failed or returned empty, still offer to initialize .env.local
+    // If API failed or returned empty, show form built from expected keys
     if (!data || (Array.isArray(data) && data.length === 0)) {
-        const msg = document.createElement('div');
-        msg.style.marginBottom = '8px';
-        msg.style.color = '#b33';
-        msg.innerText = 'Aucun paramètre trouvé — vous pouvez initialiser .env.local à partir du modèle.';
-        container.appendChild(msg);
-        // Show init button (reuse existing init endpoint flow)
-        const initDiv = document.createElement('div');
-        initDiv.style.marginTop = '10px';
-        initDiv.innerHTML = `<button id="btn-init-env" class="secondary">Initialiser .env.local</button> <span style="color:#888; font-size:12px; margin-left:8px;">Crée .env.local à partir de .env.example</span>`;
-        container.appendChild(initDiv);
-        document.getElementById('btn-init-env').addEventListener('click', async () => {
-            if (!confirm('Créer .env.local à partir de .env.example ?')) return;
-            const btn = document.getElementById('btn-init-env');
-            btn.disabled = true;
-            btn.innerText = 'Initialisation...';
-            try {
-                const r = await fetch('/api/env/init', {method: 'POST'});
-                const j = await r.json();
-                if (j.error) alert('Erreur: ' + j.error);
-                else {
-                    alert('.env.local créé');
-                    // reload form
-                    loadEnv();
-                }
-            } catch (e) {
-                alert('Request failed: ' + e);
-            } finally {
-                btn.disabled = false;
-                btn.innerText = 'Initialiser .env.local';
-            }
-        });
-        return;
+        data = [
+            {key: 'SYNC_DIR', value: '', desc: ''},
+            {key: 'PACKAGES_CONF_DIR', value: '', desc: ''},
+            {key: 'OBSIDIAN_VAULT', value: '', desc: ''},
+            {key: 'VSCODE_CONFIG', value: '', desc: ''},
+            {key: 'SYNC_TYPE', value: '', desc: ''},
+            {key: 'ENABLE_DOTFILES_SYNC', value: 'false', desc: ''},
+            {key: 'WIFI_KDBX_DB', value: '', desc: ''},
+            {key: 'WIFI_KDBX_GROUP', value: 'Wifi', desc: ''},
+            {key: 'WIFI_KDBX_KEY_FILE', value: '', desc: ''},
+            {key: 'WIFI_KDBX_DRY_RUN', value: '0', desc: ''},
+            {key: 'WIFI_KDBX_ASK_PASS', value: '1', desc: ''},
+            {key: 'AUTO_UPDATE_HOUR', value: '21', desc: ''},
+            {key: 'AUTO_UPDATE_MINUTE', value: '0', desc: ''}
+        ];
     }
 
     // data is now an array of {key, value, desc}
@@ -143,40 +126,7 @@ async function loadEnv() {
         });
     });
 
-    // If .env.local does not exist, show init button
-    try {
-        const existsRes = await fetch('/api/env/exists');
-        const existsData = await existsRes.json();
-        if (!existsData.exists) {
-            const initDiv = document.createElement('div');
-            initDiv.style.marginTop = '10px';
-            initDiv.innerHTML = `<button id="btn-init-env" class="secondary">Initialiser .env.local</button> <span style="color:#888; font-size:12px; margin-left:8px;">Crée .env.local à partir de .env.example</span>`;
-            container.prepend(initDiv);
-            document.getElementById('btn-init-env').addEventListener('click', async () => {
-                if (!confirm('Créer .env.local à partir de .env.example ?')) return;
-                const btn = document.getElementById('btn-init-env');
-                btn.disabled = true;
-                btn.innerText = 'Initialisation...';
-                try {
-                    const r = await fetch('/api/env/init', {method: 'POST'});
-                    const j = await r.json();
-                    if (j.error) alert('Erreur: ' + j.error);
-                    else {
-                        alert('.env.local créé');
-                        // reload form
-                        loadEnv();
-                    }
-                } catch (e) {
-                    alert('Request failed: ' + e);
-                } finally {
-                    btn.disabled = false;
-                    btn.innerText = 'Initialiser .env.local';
-                }
-            });
-        }
-    } catch (e) {
-        // ignore existence check failures
-    }
+    // no init button — we always present the editable form
 }
 
 async function saveEnv() {
