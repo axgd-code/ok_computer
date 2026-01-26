@@ -68,7 +68,7 @@ require_cmd() {
 list_ssids_from_keychain() {
     # Use `security` to list generic passwords of kind "AirPort network password" and extract acct (SSID)
     security find-generic-password -D "AirPort network password" 2>/dev/null \
-        | awk -F'"' '/acct/{print $2}' \
+        | awk -F'"' '/"acct"<blob>="/{print $4}' \
         | sort -u
 }
 

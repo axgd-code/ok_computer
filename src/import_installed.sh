@@ -60,17 +60,28 @@ fi
 check_homebrew_api() {
     local app=$1
     local type=$2
-    
+    # Use a short timeout and return 0 only on a successful HTTP 200 response
+    local url
     if [ "$type" = "cask" ]; then
-        curl -s -f -o /dev/null "https://formulae.brew.sh/api/cask/${app}.json"
+        url="https://formulae.brew.sh/api/cask/${app}.json"
     else
-        curl -s -f -o /dev/null "https://formulae.brew.sh/api/formula/${app}.json"
+        url="https://formulae.brew.sh/api/formula/${app}.json"
     fi
+    local http
+    http=$(curl -sS --max-time 6 -o /dev/null -w "%{http_code}" "$url" 2>/dev/null) || http=""
+    [ "$http" = "200" ]
 }
 
 check_chocolatey_api() {
     local app=$1
-    curl -s -f "https://community.chocolatey.org/api/v2/Packages()?%24filter=tolower(Id)%20eq%20tolower('${app}')" | grep -q "${app}"
+    local url="https://community.chocolatey.org/api/v2/Packages()?%24filter=tolower(Id)%20eq%20tolower('${app}')&%24select=Id"
+    local out
+    out=$(curl -sS --max-time 8 "$url" 2>/dev/null) || out=""
+    if [ -z "$out" ]; then
+        return 1
+    fi
+    # case-insensitive match of app id in returned XML/JSON
+    echo "$out" | tr '[:upper:]' '[:lower:]' | grep -q "$(echo "$app" | tr '[:upper:]' '[:lower:]')"
 }
 
 # Detect operating system

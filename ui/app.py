@@ -304,13 +304,37 @@ def api_action_install():
 @app.route('/api/action/import-installed', methods=['POST'])
 def api_action_import_installed():
     # Run bash src/import_installed.sh
-    script = BASE_DIR / 'src' / 'import_installed.sh'
-    if not script.exists():
-        return jsonify({'error':'import_installed.sh script not found'}), 500
+    def find_script(name):
+        candidates = []
+        # repo-relative (dev mode)
+        candidates.append(BASE_DIR / 'src' / name)
+        # current working dir
+        candidates.append(Path.cwd() / 'src' / name)
+        # next to the executable (one-dir builds)
+        candidates.append(Path(sys.executable).parent / 'src' / name)
+        # PyInstaller onefile unpack dir
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidates.append(Path(meipass) / 'src' / name)
+
+        found = None
+        checked = []
+        for c in candidates:
+            checked.append(str(c))
+            if c.exists():
+                found = c
+                break
+        return found, checked
+
+    script_name = 'import_installed.sh'
+    script, checked = find_script(script_name)
+    if not script:
+        return jsonify({'error': f"{script_name} script not found", 'checked': checked}), 500
+
     try:
         cmd = ['bash', str(script)]
         res = subprocess.run(cmd, capture_output=True, text=True)
-        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode})
+        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode, 'used': str(script)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
