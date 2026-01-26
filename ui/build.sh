@@ -26,7 +26,7 @@ python -m PyInstaller --name "$NAME" --onefile --noconfirm --clean \
   --noconsole \
   --add-data "templates${SEP}templates" \
   --add-data "static${SEP}static" \
-  --add-data "src${SEP}src" \
+  --add-data "${HERE}/../src${SEP}src" \
   --collect-submodules flask \
   --hidden-import socket \
   --hidden-import webview \
