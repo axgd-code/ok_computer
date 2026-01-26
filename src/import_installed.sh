@@ -1,6 +1,8 @@
 #!/bin/bash
 
-set -e
+# Do not exit the whole script on non-zero exit of commands that are used
+# for probing remote services; treat unset variables as errors.
+set -u
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -194,3 +196,6 @@ else
 fi
 
 echo -e "\n${GREEN}Done!${NC} Added $count new packages to $PACKAGES_CONF"
+
+# Explicit successful exit; avoid relying on `set -e` behavior.
+exit 0
