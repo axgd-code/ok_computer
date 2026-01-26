@@ -27,6 +27,33 @@ fi
 
 echo -e "${BLUE}Using config file:${NC} ${PACKAGES_CONF}"
 
+# If the chosen PACKAGES_CONF is not writable (e.g. inside a bundled binary's
+# temporary directory), fall back to a user-writable location under $HOME
+if [ -f "${PACKAGES_CONF}" ]; then
+    if [ ! -w "${PACKAGES_CONF}" ]; then
+        echo -e "${YELLOW}Warning:${NC} ${PACKAGES_CONF} is not writable. Falling back to user config." 
+        USER_DIR="${HOME}/.ok_computer"
+        mkdir -p "${USER_DIR}"
+        NEW_CONF="${USER_DIR}/packages.conf"
+        if [ ! -f "${NEW_CONF}" ] && [ -f "${SCRIPT_DIR}/packages.conf" ]; then
+            # seed from repository packages.conf if available
+            cp "${SCRIPT_DIR}/packages.conf" "${NEW_CONF}" || true
+        fi
+        PACKAGES_CONF="${NEW_CONF}"
+        echo -e "${BLUE}Using fallback config file:${NC} ${PACKAGES_CONF}"
+    fi
+else
+    # If the file doesn't exist, check whether we can create it in place; if not, use fallback
+    parent_dir=$(dirname "${PACKAGES_CONF}")
+    if [ ! -w "${parent_dir}" ]; then
+        echo -e "${YELLOW}Warning:${NC} Cannot create ${PACKAGES_CONF} in ${parent_dir}. Falling back to user config." 
+        USER_DIR="${HOME}/.ok_computer"
+        mkdir -p "${USER_DIR}"
+        PACKAGES_CONF="${USER_DIR}/packages.conf"
+        echo -e "${BLUE}Using fallback config file:${NC} ${PACKAGES_CONF}"
+    fi
+fi
+
 # Check availability functions (simplified versions of app.sh)
 check_homebrew_api() {
     local app=$1
