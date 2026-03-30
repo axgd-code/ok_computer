@@ -11,8 +11,95 @@ NC='\033[0m'
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.env.local"
-ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
+ENV_FILE=""
+ENV_EXAMPLE=""
+
+resolve_env_file() {
+    local candidates=(
+        "${SCRIPT_DIR}/.env.local"
+        "${SCRIPT_DIR}/../.env.local"
+        "${HOME}/.env.local"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -f "${candidate}" ]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+
+    echo "${HOME}/.env.local"
+}
+
+resolve_env_example() {
+    local candidates=(
+        "${SCRIPT_DIR}/.env.example"
+        "${SCRIPT_DIR}/../.env.example"
+    )
+
+    for candidate in "${candidates[@]}"; do
+        if [ -f "${candidate}" ]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+
+    echo "${SCRIPT_DIR}/../.env.example"
+}
+
+ENV_FILE="$(resolve_env_file)"
+ENV_EXAMPLE="$(resolve_env_example)"
+
+DEFAULT_SHARED_DIRNAME="ok_computer_shared"
+
+resolve_shared_root() {
+    if [ -z "${SYNC_DIR}" ]; then
+        return 1
+    fi
+
+    local legacy_markers=(
+        "${SYNC_DIR}/dotfiles"
+        "${SYNC_DIR}/packages.conf"
+        "${SYNC_DIR}/extensions.conf"
+        "${SYNC_DIR}/system_settings.conf"
+        "${SYNC_DIR}/exports"
+    )
+
+    for marker in "${legacy_markers[@]}"; do
+        if [ -e "${marker}" ]; then
+            echo "${SYNC_DIR}"
+            return 0
+        fi
+    done
+
+    echo "${SYNC_DIR}/${DEFAULT_SHARED_DIRNAME}"
+}
+
+shared_root_or_fail() {
+    local shared_root
+    shared_root="$(resolve_shared_root)" || return 1
+
+    if [ ! -d "${SYNC_DIR}" ]; then
+        echo -e "${RED}✗ Error: SYNC_DIR does not exist: ${SYNC_DIR}${NC}"
+        return 1
+    fi
+
+    echo "${shared_root}"
+}
+
+resolve_shared_config_target_dir() {
+    local target_dir="${PACKAGES_CONF_DIR}"
+
+    if [ -z "${target_dir}" ]; then
+        target_dir="$(resolve_shared_root 2>/dev/null || true)"
+    fi
+
+    if [ -z "${target_dir}" ]; then
+        return 1
+    fi
+
+    echo "${target_dir}"
+}
 
 # Load configuration
 load_config() {
@@ -39,6 +126,8 @@ ${BLUE}Commands:${NC}
   ${GREEN}setup${NC}              Setup dotfiles symlinks
   ${GREEN}sync${NC}               Sync changes from home to sync folder
   ${GREEN}restore${NC}            Restore from sync folder to home
+    ${GREEN}shared${NC}             Manage shared config files
+    ${GREEN}init-from-shared${NC}   Initialize machine from shared drive
   ${GREEN}status${NC}             Show dotfiles status
   ${GREEN}list${NC}               List tracked dotfiles
   ${GREEN}config${NC}             Show current configuration
@@ -49,6 +138,8 @@ ${BLUE}Commands:${NC}
 
 ${BLUE}Configuration:${NC}
   Edit ${ENV_FILE} to set SYNC_DIR, PACKAGES_CONF_DIR, OBSIDIAN_VAULT, VSCODE_CONFIG
+        Shared Ok Computer files are stored in SYNC_DIR/${DEFAULT_SHARED_DIRNAME}/ by default.
+    Dotfiles sync is manual. No cron is installed by this script.
 
 ${BLUE}Dotfiles tracked:${NC}
   - .bashrc / .zshrc
@@ -81,17 +172,14 @@ EOF
 
 # Initialize synchronization
 init_sync() {
-    if [ ! -d "${SYNC_DIR}" ]; then
-        echo -e "${RED}✗ Erreur: SYNC_DIR n'existe pas: ${SYNC_DIR}${NC}"
-        echo -e "${YELLOW}Assurez-vous que votre dossier synchronisé est configuré et accessible${NC}"
-        return 1
-    fi
+    local shared_root
+    shared_root="$(shared_root_or_fail)" || return 1
     
     echo -e "${BLUE}Initializing dotfiles synchronization...${NC}"
-    echo -e "Destination: ${GREEN}${SYNC_DIR}${NC}\n"
+    echo -e "Destination: ${GREEN}${shared_root}${NC}\n"
     
     # Créer le dossier dotfiles s'il n'existe pas
-    local DOTFILES_DIR="${SYNC_DIR}/dotfiles"
+    local DOTFILES_DIR="${shared_root}/dotfiles"
     mkdir -p "${DOTFILES_DIR}"
     
     echo -e "${BLUE}Copying existing dotfiles...${NC}"
@@ -112,16 +200,15 @@ init_sync() {
     
     echo -e "\n${GREEN}✓ Initialization complete (${count} files)${NC}"
     echo -e "Next step: ${BLUE}bash dotfiles.sh setup${NC}"
+    echo -e "${YELLOW}Note:${NC} synchronization remains manual; run sync or restore when needed."
 }
 
 # Create symlinks
 setup_symlinks() {
-    if [ ! -d "${SYNC_DIR}" ]; then
-        echo -e "${RED}✗ Error: SYNC_DIR does not exist${NC}"
-        return 1
-    fi
+    local shared_root
+    shared_root="$(shared_root_or_fail)" || return 1
     
-    local DOTFILES_DIR="${SYNC_DIR}/dotfiles"
+    local DOTFILES_DIR="${shared_root}/dotfiles"
     
     if [ ! -d "${DOTFILES_DIR}" ]; then
         echo -e "${RED}✗ Error: ${DOTFILES_DIR} does not exist${NC}"
@@ -167,12 +254,10 @@ setup_symlinks() {
 
 # Sync from home to sync folder
 sync_to_remote() {
-    if [ ! -d "${SYNC_DIR}" ]; then
-        echo -e "${RED}✗ Erreur: SYNC_DIR n'existe pas${NC}"
-        return 1
-    fi
+    local shared_root
+    shared_root="$(shared_root_or_fail)" || return 1
     
-    local DOTFILES_DIR="${SYNC_DIR}/dotfiles"
+    local DOTFILES_DIR="${shared_root}/dotfiles"
     mkdir -p "${DOTFILES_DIR}"
     
     echo -e "${BLUE}Syncing to sync folder...${NC}\n"
@@ -202,12 +287,10 @@ sync_to_remote() {
 
 # Restore from sync folder to home
 restore_from_remote() {
-    if [ ! -d "${SYNC_DIR}" ]; then
-        echo -e "${RED}✗ Erreur: SYNC_DIR n'existe pas${NC}"
-        return 1
-    fi
+    local shared_root
+    shared_root="$(shared_root_or_fail)" || return 1
     
-    local DOTFILES_DIR="${SYNC_DIR}/dotfiles"
+    local DOTFILES_DIR="${shared_root}/dotfiles"
     
     if [ ! -d "${DOTFILES_DIR}" ]; then
         echo -e "${RED}✗ Erreur: ${DOTFILES_DIR} n'existe pas${NC}"
@@ -256,9 +339,13 @@ show_status() {
         return 1
     fi
     
+    local shared_root
+    shared_root="$(resolve_shared_root)"
+
     echo -e "  ${GREEN}✓ SYNC_DIR: ${SYNC_DIR}${NC}"
+    echo -e "  ${GREEN}✓ Shared root: ${shared_root}${NC}"
     
-    local DOTFILES_DIR="${SYNC_DIR}/dotfiles"
+    local DOTFILES_DIR="${shared_root}/dotfiles"
     if [ -d "${DOTFILES_DIR}" ]; then
         echo -e "  ${GREEN}✓ Dotfiles folder found${NC}"
         
@@ -278,6 +365,9 @@ show_status() {
     else
         echo -e "  ${YELLOW}⚠ Dotfiles folder not found${NC}"
     fi
+
+    echo ""
+    manage_shared_configs status 2>/dev/null || true
 }
 
 # List dotfiles
@@ -442,26 +532,31 @@ manage_vscode() {
 # Manage packages.conf
 manage_packages() {
     local cmd="${1:-status}"
+    local target_dir="${PACKAGES_CONF_DIR}"
     
-    if [ -z "${PACKAGES_CONF_DIR}" ]; then
+    if [ -z "${target_dir}" ]; then
+        target_dir="$(resolve_shared_root 2>/dev/null || true)"
+    fi
+
+    if [ -z "${target_dir}" ]; then
         echo -e "${YELLOW}⚠ PACKAGES_CONF_DIR is not defined in ${ENV_FILE}${NC}"
-        echo -e "${BLUE}Example: PACKAGES_CONF_DIR=\"\$HOME/OneDrive/ok_computer\"${NC}"
+        echo -e "${BLUE}Configure SYNC_DIR or PACKAGES_CONF_DIR first${NC}"
         return 1
     fi
     
-    if [ ! -d "${PACKAGES_CONF_DIR}" ]; then
-        echo -e "${YELLOW}⚠ Directory does not exist: ${PACKAGES_CONF_DIR}${NC}"
+    if [ ! -d "${target_dir}" ]; then
+        echo -e "${YELLOW}⚠ Directory does not exist: ${target_dir}${NC}"
         echo -e "${BLUE}Creating directory...${NC}"
-        mkdir -p "${PACKAGES_CONF_DIR}"
+        mkdir -p "${target_dir}"
     fi
     
     local SOURCE_CONF="${SCRIPT_DIR}/packages.conf"
     local EXAMPLE_CONF="${SCRIPT_DIR}/packages.conf.example"
-    local REMOTE_CONF="${PACKAGES_CONF_DIR}/packages.conf"
+    local REMOTE_CONF="${target_dir}/packages.conf"
     
     case "${cmd}" in
         sync)
-            echo -e "${BLUE}Syncing packages.conf to ${PACKAGES_CONF_DIR}...${NC}"
+            echo -e "${BLUE}Syncing packages.conf to ${target_dir}...${NC}"
             if [ -f "${SOURCE_CONF}" ]; then
                 cp "${SOURCE_CONF}" "${REMOTE_CONF}"
                 echo -e "${GREEN}✓ packages.conf synced${NC}"
@@ -474,7 +569,7 @@ manage_packages() {
             fi
             ;;
         restore)
-            echo -e "${BLUE}Restoring packages.conf from ${PACKAGES_CONF_DIR}...${NC}"
+            echo -e "${BLUE}Restoring packages.conf from ${target_dir}...${NC}"
             if [ -f "${REMOTE_CONF}" ]; then
                 cp "${REMOTE_CONF}" "${SOURCE_CONF}"
                 echo -e "${GREEN}✓ packages.conf restored${NC}"
@@ -488,8 +583,7 @@ manage_packages() {
             fi
             ;;
         status)
-            echo -e "${BLUE}packages.conf status:${NC}"
-            echo -e "  Synced folder: ${GREEN}${PACKAGES_CONF_DIR}${NC}"
+            echo -e "  Remote dir: ${GREEN}${target_dir}${NC}"
             if [ -f "${REMOTE_CONF}" ]; then
                 local line_count=$(wc -l < "${REMOTE_CONF}" 2>/dev/null | tr -d ' ')
                 echo -e "  Remote file: ${GREEN}${REMOTE_CONF}${NC} (${line_count} lines)"
@@ -504,6 +598,110 @@ manage_packages() {
             fi
             ;;
     esac
+}
+
+manage_shared_configs() {
+    local cmd="${1:-status}"
+    local target_dir
+    target_dir="$(resolve_shared_config_target_dir 2>/dev/null || true)"
+
+    if [ -z "${target_dir}" ]; then
+        echo -e "${YELLOW}⚠ Shared configuration target is not defined${NC}"
+        echo -e "${BLUE}Configure SYNC_DIR or PACKAGES_CONF_DIR first${NC}"
+        return 1
+    fi
+
+    if [ ! -d "${target_dir}" ]; then
+        mkdir -p "${target_dir}"
+    fi
+
+    local files=(packages.conf extensions.conf system_settings.conf)
+    local synced=0
+    local restored=0
+
+    case "${cmd}" in
+        sync)
+            echo -e "${BLUE}Syncing shared configuration files to ${target_dir}...${NC}"
+            for name in "${files[@]}"; do
+                local source_path="${SCRIPT_DIR}/${name}"
+                local example_path="${SCRIPT_DIR}/${name}.example"
+                local target_path="${target_dir}/${name}"
+                if [ -f "${source_path}" ]; then
+                    cp "${source_path}" "${target_path}"
+                    echo -e "  ${GREEN}✓${NC} ${name}"
+                    ((synced++))
+                elif [ -f "${example_path}" ]; then
+                    cp "${example_path}" "${target_path}"
+                    echo -e "  ${GREEN}✓${NC} ${name} (seeded from example)"
+                    ((synced++))
+                else
+                    echo -e "  ${YELLOW}⚠${NC} ${name} missing locally"
+                fi
+            done
+            echo -e "\n${GREEN}✓ Shared config sync complete (${synced} files)${NC}"
+            ;;
+        restore)
+            echo -e "${BLUE}Restoring shared configuration files from ${target_dir}...${NC}"
+            for name in "${files[@]}"; do
+                local source_path="${target_dir}/${name}"
+                local target_path="${SCRIPT_DIR}/${name}"
+                if [ -f "${source_path}" ]; then
+                    cp "${source_path}" "${target_path}"
+                    echo -e "  ${GREEN}✓${NC} ${name}"
+                    ((restored++))
+                else
+                    echo -e "  ${YELLOW}⚠${NC} ${name} not found in shared drive"
+                fi
+            done
+            echo -e "\n${GREEN}✓ Shared config restore complete (${restored} files)${NC}"
+            ;;
+        status)
+            echo -e "${BLUE}Shared configuration status:${NC}"
+            echo -e "  Shared dir: ${GREEN}${target_dir}${NC}"
+            for name in "${files[@]}"; do
+                local source_path="${SCRIPT_DIR}/${name}"
+                local target_path="${target_dir}/${name}"
+                local local_label="${YELLOW}missing${NC}"
+                local remote_label="${YELLOW}missing${NC}"
+                [ -f "${source_path}" ] && local_label="${GREEN}present${NC}"
+                [ -f "${target_path}" ] && remote_label="${GREEN}present${NC}"
+                echo -e "  - ${name}: local ${local_label}, shared ${remote_label}"
+            done
+            ;;
+        *)
+            echo -e "${RED}✗ Unknown shared config action: ${cmd}${NC}"
+            return 1
+            ;;
+    esac
+}
+
+init_from_shared_drive() {
+    local shared_root
+    shared_root="$(shared_root_or_fail)" || return 1
+
+    echo -e "${BLUE}Initializing machine from shared drive...${NC}"
+    echo -e "Shared root: ${GREEN}${shared_root}${NC}\n"
+
+    manage_shared_configs restore || return 1
+
+    if [ -d "${shared_root}/dotfiles" ]; then
+        restore_from_remote || return 1
+    else
+        echo -e "${YELLOW}⚠ No shared dotfiles folder found, skipping dotfiles restore${NC}"
+    fi
+
+    if [ -f "${SCRIPT_DIR}/init.sh" ]; then
+        bash "${SCRIPT_DIR}/init.sh"
+    else
+        echo -e "${RED}✗ init.sh not found${NC}"
+        return 1
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ] && [ -f "${SCRIPT_DIR}/setup_browsers.sh" ]; then
+        bash "${SCRIPT_DIR}/setup_browsers.sh"
+    fi
+
+    echo -e "\n${GREEN}✓ Initialization from shared drive completed${NC}"
 }
 
 case "$1" in
@@ -544,6 +742,12 @@ case "$1" in
         ;;
     packages)
         manage_packages "${2:-status}"
+        ;;
+    shared)
+        manage_shared_configs "${2:-status}"
+        ;;
+    init-from-shared)
+        init_from_shared_drive
         ;;
     *)
         echo -e "${RED}✗ Unknown command: $1${NC}"

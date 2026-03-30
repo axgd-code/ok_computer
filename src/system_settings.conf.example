@@ -1,0 +1,16 @@
+# System settings shared across OS
+# Format: key|mac|win|linux|description
+# - Use '-' when unsupported on an OS.
+# - Boolean values: true/false
+# - Other values depend on the key.
+
+dock_autohide|true|true|true|Auto-hide dock/taskbar (best effort)
+show_file_extensions|true|true|true|Show filename extensions in file manager
+tap_to_click|true|-|true|Enable tap to click on touchpad
+natural_scroll|true|-|true|Enable natural scrolling
+clock_24h|true|true|true|Use 24-hour clock format
+dark_mode|false|false|false|Enable dark mode (best effort)
+dock_position|left|left|left|Dock/taskbar position (left, bottom, right, top)
+show_recent_apps|false|-|-|Show recent apps section in dock
+textedit_plain_text|true|-|-|Open TextEdit in plain text mode
+time_machine_offer_disks|false|-|-|Offer new disks for Time Machine backups

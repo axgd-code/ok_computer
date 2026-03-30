@@ -29,8 +29,8 @@ compile_script() {
   # On ignore les warnings et on nettoie après
   shc -f "${script_path}" -i /bin/bash -o "${out}" 2>/dev/null || true
   
-  # Nettoyer les fichiers générés non-utiles
-  rm -f "${out}.x.c" "${out}.x" 2>/dev/null || true
+  # Nettoyer les fichiers générés non-utiles (ils restent à côté du script source)
+  rm -f "${script_path}.x.c" 2>/dev/null || true
   
   # Vérifier que le binaire existe
   if [ -f "${out}" ]; then

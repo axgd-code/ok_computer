@@ -17,6 +17,15 @@ else
     PACKAGES_CONF="${SCRIPT_DIR}/packages.conf.example"
 fi
 
+# Determine path to system_settings.conf
+if [ -n "${PACKAGES_CONF_DIR:-}" ] && [ -f "${PACKAGES_CONF_DIR}/system_settings.conf" ]; then
+    SETTINGS_CONF="${PACKAGES_CONF_DIR}/system_settings.conf"
+elif [ -f "${SCRIPT_DIR}/system_settings.conf" ]; then
+    SETTINGS_CONF="${SCRIPT_DIR}/system_settings.conf"
+else
+    SETTINGS_CONF="${SCRIPT_DIR}/system_settings.conf.example"
+fi
+
 echo "Configuring Windows..."
 
 # Install and configure Chocolatey if needed
@@ -45,6 +54,68 @@ while IFS='|' read -r type mac_name win_name desc; do
 done < "${PACKAGES_CONF}"
 
 echo "Applying Windows settings..."
+
+as_bool() {
+    case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) echo "true" ;;
+        *) echo "false" ;;
+    esac
+}
+
+ps_exec() {
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$1" >/dev/null 2>&1 || true
+}
+
+apply_windows_setting() {
+    local key="$1"
+    local value="$2"
+    local b
+    b="$(as_bool "$value")"
+
+    case "$key" in
+        show_file_extensions)
+            if [ "$b" = "true" ]; then
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Type DWord -Value 0'
+            else
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Type DWord -Value 1'
+            fi
+            ;;
+        clock_24h)
+            if [ "$b" = "true" ]; then
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Control Panel\International" -Name "iTime" -Value "1"'
+            else
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Control Panel\International" -Name "iTime" -Value "0"'
+            fi
+            ;;
+        dark_mode)
+            if [ "$b" = "true" ]; then
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Type DWord -Value 0'
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Type DWord -Value 0'
+            else
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Type DWord -Value 1'
+                ps_exec 'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Type DWord -Value 1'
+            fi
+            ;;
+        dock_autohide|tap_to_click|natural_scroll|dock_position|show_recent_apps|textedit_plain_text|time_machine_offer_disks)
+            echo "  - ${key}: unsupported or hardware-dependent on Windows (skipped)"
+            ;;
+        *)
+            echo "  - ${key}: unknown setting (skipped)"
+            ;;
+    esac
+}
+
+while IFS='|' read -r key mac_value win_value linux_value desc; do
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [[ -z "$key" ]] && continue
+
+    if [ -z "${win_value:-}" ] || [ "$win_value" = "-" ]; then
+        continue
+    fi
+
+    echo "  - Applying ${key}: ${win_value}"
+    apply_windows_setting "$key" "$win_value"
+done < "${SETTINGS_CONF}"
 
 # Git configuration (if needed)
 # git config --global user.name "Votre Nom"

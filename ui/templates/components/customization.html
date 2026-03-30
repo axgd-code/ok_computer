@@ -1,0 +1,38 @@
+<section class="hero-card compact">
+    <div>
+        <p class="eyebrow">Step 2</p>
+        <h2>Customization</h2>
+        <p class="hero-copy">Edit the reference configuration shared by every machine: applications, browser extensions, system settings and advanced environment variables.</p>
+    </div>
+    <div class="hero-actions">
+        <button onclick="switchTab('export')">Continue to export</button>
+    </div>
+</section>
+
+<nav class="section-jump-nav" aria-label="Customization sections">
+    <button class="jump-chip" onclick="document.getElementById('customization-apps').scrollIntoView({behavior: 'smooth', block: 'start'})">Applications</button>
+    <button class="jump-chip" onclick="document.getElementById('customization-extensions').scrollIntoView({behavior: 'smooth', block: 'start'})">Extensions</button>
+    <button class="jump-chip" onclick="document.getElementById('customization-system').scrollIntoView({behavior: 'smooth', block: 'start'})">System Settings</button>
+    <button class="jump-chip" onclick="document.getElementById('customization-search').scrollIntoView({behavior: 'smooth', block: 'start'})">Discovery</button>
+    <button class="jump-chip" onclick="document.getElementById('customization-advanced').scrollIntoView({behavior: 'smooth', block: 'start'})">Advanced</button>
+</nav>
+
+<section id="customization-apps" class="stage-section">
+    {% include 'components/packages.html' %}
+</section>
+
+<section id="customization-extensions" class="stage-section">
+    {% include 'components/extensions.html' %}
+</section>
+
+<section id="customization-system" class="stage-section">
+    {% include 'components/system_settings.html' %}
+</section>
+
+<section id="customization-search" class="stage-section">
+    {% include 'components/search.html' %}
+</section>
+
+<section id="customization-advanced" class="stage-section">
+    {% include 'components/settings.html' %}
+</section>

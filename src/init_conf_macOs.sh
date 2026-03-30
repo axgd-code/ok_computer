@@ -1,44 +1,108 @@
 #!/bin/bash
 
-echo "Configuring macOS..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# macOS configuration preferences (inspired by https://macos-defaults.com/)
-# Dock
-## Dock on the left side
-defaults write com.apple.dock "orientation" -string "left" 
-## Icon size
-defaults write com.apple.dock "tilesize" -int "22" 
-## Auto-hide the Dock
-defaults write com.apple.dock "autohide" -bool "true"
-## Do not show recent apps section
-defaults write com.apple.dock "show-recents" -bool "false"
+if [ -f "${SCRIPT_DIR}/../.env.local" ]; then
+	# shellcheck disable=SC1091
+	source "${SCRIPT_DIR}/../.env.local"
+fi
 
-# Finder
-## Show filename extensions by default
-defaults write NSGlobalDomain "AppleShowAllExtensions" -bool "false"
-## Do not warn on extension change
-defaults write com.apple.finder "FXEnableExtensionChangeWarning" -bool "false"
-# Save to disk by default instead of iCloud
-defaults write NSGlobalDomain "NSDocumentSaveNewDocumentsToCloud" -bool "false" 
+if [ -n "${PACKAGES_CONF_DIR:-}" ] && [ -f "${PACKAGES_CONF_DIR}/system_settings.conf" ]; then
+	SETTINGS_CONF="${PACKAGES_CONF_DIR}/system_settings.conf"
+elif [ -f "${SCRIPT_DIR}/system_settings.conf" ]; then
+	SETTINGS_CONF="${SCRIPT_DIR}/system_settings.conf"
+else
+	SETTINGS_CONF="${SCRIPT_DIR}/system_settings.conf.example"
+fi
 
-## Menus
-## Clock format
-defaults write com.apple.menuextra.clock "DateFormat" -string "\"EEE d MMM HH:MM\"" 
+echo "Configuring macOS system settings..."
 
-## Feedback Assistant
-defaults write com.apple.appleseed.FeedbackAssistant "Autogather" -bool "false" 
+as_bool() {
+	case "$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+		1|true|yes|on) echo "true" ;;
+		*) echo "false" ;;
+	esac
+}
 
-# TextEdit
-## Open as plain text by default
-defaults write com.apple.TextEdit "RichText" -bool "false"
+apply_macos_setting() {
+	local key="$1"
+	local value="$2"
+	local b
+	b="$(as_bool "$value")"
 
-## Time Machine
-## Do not offer new disks for Time Machine backups
-defaults write com.apple.TimeMachine "DoNotOfferNewDisksForBackup" -bool "true" 
+	case "$key" in
+		dock_autohide)
+			defaults write com.apple.dock autohide -bool "$b"
+			;;
+		dock_position)
+			defaults write com.apple.dock orientation -string "$value"
+			;;
+		show_recent_apps)
+			defaults write com.apple.dock show-recents -bool "$b"
+			;;
+		show_file_extensions)
+			defaults write NSGlobalDomain AppleShowAllExtensions -bool "$b"
+			;;
+		tap_to_click)
+			if [ "$b" = "true" ]; then
+				defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
+				defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
+			else
+				defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool false
+				defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 0
+			fi
+			;;
+		natural_scroll)
+			defaults write NSGlobalDomain com.apple.swipescrolldirection -bool "$b"
+			;;
+		clock_24h)
+			if [ "$b" = "true" ]; then
+				defaults write com.apple.menuextra.clock DateFormat -string '"EEE d MMM HH:mm"'
+			else
+				defaults write com.apple.menuextra.clock DateFormat -string '"EEE d MMM h:mm a"'
+			fi
+			;;
+		dark_mode)
+			if [ "$b" = "true" ]; then
+				osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to true' >/dev/null 2>&1 || true
+			else
+				osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to false' >/dev/null 2>&1 || true
+			fi
+			;;
+		textedit_plain_text)
+			if [ "$b" = "true" ]; then
+				defaults write com.apple.TextEdit RichText -bool false
+			else
+				defaults write com.apple.TextEdit RichText -bool true
+			fi
+			;;
+		time_machine_offer_disks)
+			# macOS setting is inverted: DoNotOfferNewDisksForBackup
+			if [ "$b" = "true" ]; then
+				defaults write com.apple.TimeMachine DoNotOfferNewDisksForBackup -bool false
+			else
+				defaults write com.apple.TimeMachine DoNotOfferNewDisksForBackup -bool true
+			fi
+			;;
+		*)
+			echo "  - ${key}: unknown setting (skipped)"
+			;;
+	esac
+}
 
-### Trackpad
-## Enable tap to click
-defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true
-defaults -currentHost write NSGlobalDomain com.apple.mouse.tapBehavior -int 1
-## Disable "natural" scroll
-defaults write NSGlobalDomain com.apple.swipescrolldirection -bool true
+while IFS='|' read -r key mac_value win_value linux_value desc; do
+	[[ "$key" =~ ^#.*$ ]] && continue
+	[[ -z "$key" ]] && continue
+
+	if [ -z "${mac_value:-}" ] || [ "$mac_value" = "-" ]; then
+		continue
+	fi
+
+	echo "  - Applying ${key}: ${mac_value}"
+	apply_macos_setting "$key" "$mac_value"
+done < "${SETTINGS_CONF}"
+
+killall Dock >/dev/null 2>&1 || true
+killall Finder >/dev/null 2>&1 || true
+
+echo "macOS system settings configuration completed"

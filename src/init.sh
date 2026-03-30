@@ -133,9 +133,59 @@ elif [ "${MACHINE}" = "Windows" ]; then
     bash "${SCRIPT_DIR}/init_conf_windows.sh"
     
 elif [ "${MACHINE}" = "Linux" ]; then
-    echo "Linux detected - script not configured for Linux"
-    echo "Please create an init_conf_linux.sh for Linux"
-    exit 1
+    echo "Configuring for Linux..."
+
+    install_pkg_linux() {
+        local pkg="$1"
+        if [ -z "$pkg" ] || [ "$pkg" = "-" ]; then
+            return
+        fi
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update || true
+            sudo apt-get install -y "$pkg" || true
+        elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y "$pkg" || true
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y "$pkg" || true
+        else
+            echo "No supported Linux package manager found for $pkg"
+        fi
+    }
+
+    while IFS='|' read -r type mac_name win_name desc; do
+        [[ "$type" =~ ^#.*$ ]] && continue
+        [[ -z "$type" ]] && continue
+
+        # packages.conf has mac and win columns; for Linux we use mac_name first, then win_name fallback.
+        target_pkg="$mac_name"
+        if [ -z "$target_pkg" ] || [ "$target_pkg" = "-" ]; then
+            target_pkg="$win_name"
+        fi
+
+        case "$type" in
+            tap|cask|mas)
+                # Homebrew/mac-only types are skipped on Linux.
+                continue
+                ;;
+            pip)
+                if [ -n "$target_pkg" ] && [ "$target_pkg" != "-" ] && command -v pip3 >/dev/null 2>&1; then
+                    pip3 install --user "$target_pkg" || true
+                fi
+                ;;
+            npm)
+                if [ -n "$target_pkg" ] && [ "$target_pkg" != "-" ] && command -v npm >/dev/null 2>&1; then
+                    npm install -g "$target_pkg" || true
+                fi
+                ;;
+            *)
+                install_pkg_linux "$target_pkg"
+                ;;
+        esac
+    done < "${PACKAGES_CONF}"
+
+    bash "${SCRIPT_DIR}/init_conf_linux.sh"
+
+    echo "Linux package configuration completed"
 else
     echo "Système d'exploitation non supporté: ${MACHINE}"
     exit 1

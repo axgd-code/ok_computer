@@ -1,241 +1,358 @@
-# ok_computer
+<p align="center">
+  <img src="ui/static/img/logo.svg" alt="OK Computer logo" width="160">
+</p>
 
-A set of scripts to quickly configure a new computer (macOS, Windows, Linux).
+# OK Computer
 
-## Quick Install
+OK Computer is an open source toolbox to bootstrap, maintain, and migrate a workstation with the same set of scripts from either the command line or a compiled desktop UI.
 
-### From releases (recommended)
+It is built to work across multiple operating systems with the same project model:
 
-Download the latest release and extract:
+- macOS
+- Linux
+- Windows
+
+The goal is not to provide identical low-level behavior on every OS, because package managers, browser paths, and system settings differ. The goal is to provide one consistent control plane for those OS-specific operations.
+
+It is designed for people who want one place to manage:
+
+- package installation and removal
+- browser extensions
+- dotfiles and shared-drive sync
+- system settings
+- Wi-Fi export to KeePassXC
+- machine-to-machine migration through configuration ZIP exports
+
+## Cross-Platform Compatibility
+
+OK Computer is explicitly designed as a cross-platform project.
+
+- the CLI scripts cover macOS, Linux, and Windows workflows where the underlying tools exist
+- the package model supports OS-specific mappings in a single shared catalog
+- the desktop UI wraps the same script and configuration model regardless of the target platform
+- migration through ZIP export/import is intended to work across machines, not only inside one OS family
+
+In practice, compatibility means:
+
+- one shared repository and one shared configuration model
+- OS-aware scripts for package installation and system configuration
+- one desktop UI for users who do not want to operate directly from the shell
+
+This is particularly useful if you maintain more than one machine or if your setup mixes macOS, Linux, and Windows.
+
+## What You Can Do
+
+With OK Computer, you can:
+
+- initialize a new machine from a curated package list
+- maintain a shared `packages.conf` catalog
+- manage dotfiles through a synced drive or ZIP snapshots
+- restore a machine from an exported configuration ZIP
+- install and remove apps from the CLI
+- operate the same workflows from a desktop UI that wraps the scripts
+
+## Release Assets
+
+Each tagged GitHub release can publish two deliverables:
+
+1. `ok_computer-cli-<tag>.zip`
+   A CLI-first archive containing the scripts, `okc`, `.env.example`, and supporting files.
+
+2. `ok_computer-ui-<os>-<tag>.zip`
+   A compiled desktop UI bundle for the target operating system. The UI talks to the same scripts and configuration model as the CLI.
+
+This is handled by GitHub Actions in [release.yml](.github/workflows/release.yml).
+
+## Quick Start
+
+### CLI users
+
+Download the latest CLI ZIP from GitHub Releases, extract it, then run:
+
 ```bash
-curl -fsSL -o init-computer.tar.gz \
-  https://github.com/axgd-code/ok_computer/releases/download/$(curl -s https://api.github.com/repos/axgd-code/ok_computer/releases/latest | grep tag_name | cut -d'"' -f4)/init-mac-scripts.tar.gz
-tar -xzf init-computer.tar.gz
+chmod +x okc install_okc.sh
+./install_okc.sh
+okc init
 ```
 
-Run the installer using the included `okc` helper:
+If you do not want to install `okc` globally, you can run it locally:
+
 ```bash
 chmod +x okc
 ./okc init
 ```
 
-Or install `okc` system-wide first and then run:
-```bash
-chmod +x okc install_okc.sh
-sudo ./install_okc.sh
-okc init
-```
+### Desktop UI users
 
-### From source
+Download the compiled UI ZIP for your OS from GitHub Releases, extract it, and launch the application.
 
-```bash
-git clone https://github.com/axgd-code/ok_computer.git
-cd ok_computer
-chmod +x okc install_okc.sh
-./install_okc.sh    # optional: install okc into your PATH
-okc init
-```
+The UI lets you:
 
-## Repository layout
-
-- `src/`: main scripts and helpers
-  - `src/init.sh`: OS detection and orchestrator
-  - `src/init_conf_macOs.sh`, `src/init_conf_windows.sh`: platform-specific steps
-  - `src/packages.conf`: package list used by installers
-  - `src/app.sh`: app management helper (install/add/remove/list)
-  - `src/dotfiles.sh`: dotfiles sync and symlink management
-  - `src/wifi_from_kdbx.sh`: import Wi‑Fi profiles from KeePassXC vaults
-  - `src/update.sh`: update packages and tools
-  - `src/setup_auto_update.sh`: configure automated updates
-- `test/`: local checks and scripts
+- inspect and edit `.env.local`
+- browse packages and extensions
+- run update actions
+- export or restore a configuration ZIP
+- trigger dotfiles workflows, including `setup` for symlink-based drive sync
 
 ## Configuration
 
-Copy `.env.example` to `.env.local` and edit the values to match your setup.
+Copy `.env.example` to `.env.local` and adjust it to your environment.
 
-Important variables:
-- `SYNC_DIR`: path to your synchronized folder (OneDrive, Synology Drive, Dropbox, ...)
-- `PACKAGES_CONF_DIR`: optional remote folder to keep a shared `packages.conf`
-- `OBSIDIAN_VAULT`, `VSCODE_CONFIG`: optional paths for Obsidian or VS Code sync
+Important variables include:
 
-Automatic update schedule (optional):
-- `AUTO_UPDATE_HOUR` (0-23, default: 21)
-- `AUTO_UPDATE_MINUTE` (0-59, default: 0)
+- `SYNC_DIR`: root of your synced drive location; OK Computer stores shared data under `ok_computer_shared/`
+- `PACKAGES_CONF_DIR`: optional shared folder for `packages.conf`
+- `OBSIDIAN_VAULT`: optional path to a synced Obsidian vault
+- `VSCODE_CONFIG`: optional path to shared VS Code user settings
+- `ENABLE_DOTFILES_SYNC`: enables the dotfiles feature in the UI
+- `DOTFILES_SYNC_MODE`: preferred workflow, `drive` or `zip`
+- `AUTO_UPDATE_HOUR`: automatic update hour
+- `AUTO_UPDATE_MINUTE`: automatic update minute
 
-Example `.env.local`:
+Example:
+
 ```dotenv
+SYNC_DIR="$HOME/OneDrive"
+ENABLE_DOTFILES_SYNC=true
+DOTFILES_SYNC_MODE="drive"
 AUTO_UPDATE_HOUR=21
 AUTO_UPDATE_MINUTE=0
 ```
 
-`src/setup_auto_update.sh` will read `.env.local` and configure:
-- macOS: a `launchd` agent
-- Windows: a scheduled task via `schtasks`
-- Linux: a cron job
+With this configuration, OK Computer uses:
 
-## Usage (`okc` helper)
+- local runtime: `~/.ok_computer`
+- shared drive root: `$SYNC_DIR/ok_computer_shared`
 
-The `okc` script dispatches to `src/<command>.sh`. Examples:
+## Recommended Local and Shared Layout
 
-Dotfiles:
-```bash
-okc dotfiles init    # initialize dotfiles sync
-okc dotfiles setup   # create symlinks
-okc dotfiles sync    # push changes to sync folder
-okc dotfiles restore # restore from sync folder
-okc dotfiles status  # show status
+The current recommended and now supported model is:
+
+- a local runtime directory under `~/.ok_computer`
+- a shared drive root such as `~/OneDrive` or `~/SynologyDrive`
+- a shared OK Computer directory under that drive called `ok_computer_shared`
+
+So a typical layout looks like this:
+
+```text
+~/.ok_computer/
+  src/
+  .env.local
+
+~/OneDrive/ok_computer_shared/
+  packages.conf
+  extensions.conf
+  system_settings.conf        # optional
+  dotfiles/
+  exports/
 ```
 
-App manager:
+Why this is a good model:
+
+- it gives the application and the CLI one stable local runtime location
+- it keeps shared assets grouped in one place
+- it makes multi-machine migration easier
+- it avoids scattering symlinks all over the home directory for non-dotfile configuration
+
+### What should be shared through a drive
+
+Good candidates for a shared folder are:
+
+- `packages.conf`
+- `extensions.conf`
+- `system_settings.conf` when you want shared defaults
+- exported ZIP snapshots
+- the `dotfiles/` directory used by the dotfiles workflow
+- optional shared assets such as Obsidian or VS Code user settings
+
+### What should stay local by default
+
+`.env.local` should usually stay local, or at least be split carefully.
+
+Reasons:
+
+- it may contain machine-specific paths
+- it may contain values that differ across OSes
+- it can contain sensitive local configuration
+
+So the safest recommendation is:
+
+- keep shared catalogs and dotfiles in the drive
+- keep `.env.local` local
+- if needed later, introduce a shared config plus local override model instead of syncing one identical `.env.local` to every machine
+
+### Current architecture decision
+
+The project now treats `~/.ok_computer` as the official local runtime.
+
+That means:
+
+- scripts and local runtime state live under `~/.ok_computer`
+- `.env.local` stays local by default
+- shared machine-to-machine assets live under `$SYNC_DIR/ok_computer_shared`
+- dotfiles are still exposed into `$HOME` through symlinks when you run `setup`
+
+This is more maintainable than trying to make the entire runtime directory itself a direct symlink into a drive.
+
+### What is already implemented
+
+Today, the project already uses this logic:
+
+- local runtime under `~/.ok_computer`
+- drive-backed shared folder under `ok_computer_shared`
+- shared resolution for:
+  - `packages.conf`
+  - `extensions.conf`
+  - `dotfiles/`
+  - `exports/`
+  - optionally `system_settings.conf`
+- local `.env.local`
+
+### Planned next steps
+
+The following ideas are intentionally left for a later iteration:
+
+- init from shared drive
+- explicit sync of shared configs
+- optional `env.shared` plus `env.local` layering
+
+## CLI Usage
+
+The `okc` wrapper dispatches to scripts under `src/`.
+
+### Bootstrap a machine
+
+```bash
+okc init
+```
+
+### Manage packages
+
 ```bash
 okc app install firefox
 okc app uninstall firefox
+okc app add docker
+okc app remove docker
 okc app list
-okc app add some-app
-okc app remove some-app
 ```
 
-Automatic updates:
+### Manage dotfiles
+
 ```bash
-okc setup_auto_update
-# or
-bash src/setup_auto_update.sh
+okc dotfiles init
+okc dotfiles setup
+okc dotfiles sync
+okc dotfiles restore
+okc dotfiles status
 ```
 
-Wi‑Fi import from KeePassXC:
+How dotfiles work:
+
+- `init` copies tracked files into `$SYNC_DIR/ok_computer_shared/dotfiles`
+- `setup` creates symlinks from your home directory to that shared folder
+- once symlinks are in place, your drive client handles automatic synchronization
+- `sync` and `restore` remain useful when you want explicit push/pull behavior
+
+### Manage shared package catalogs
+
+```bash
+okc packages status
+okc packages sync
+okc packages restore
+```
+
+### Manage optional targets
+
+```bash
+okc dotfiles obsidian status
+okc dotfiles obsidian sync
+okc dotfiles vscode restore
+```
+
+### Export Wi-Fi credentials to KeePassXC
+
 ```bash
 okc wifi_from_kdbx --db /path/to/vault.kdbx --group "Wi-Fi"
-# or
-bash src/wifi_from_kdbx.sh --db /path/to/vault.kdbx --group "Wi-Fi"
 ```
 
-## Packages management
+Optional variables for Wi-Fi workflows:
 
-`src/packages.conf` lists packages and the cross-platform mappings used by the installers. You can keep a personal copy of this list in a synced folder and point `PACKAGES_CONF_DIR` at it.
+- `WIFI_KDBX_DB`
+- `WIFI_KDBX_GROUP`
+- `WIFI_KDBX_KEY_FILE`
+- `WIFI_KDBX_ASK_PASS`
 
-App manager helpers (`src/app.sh`) can add or remove entries from `packages.conf`, install/uninstall apps, and check availability across platforms.
+## Desktop UI Workflow
 
-## Dotfiles synchronization
+The compiled UI is intended for users who prefer discovery and guided actions over raw shell commands.
 
-Keep your dotfiles in a synced directory (OneDrive, Synology Drive, Dropbox...) and use `src/dotfiles.sh` to manage symlinks and restore files.
+The desktop application can:
 
-Common commands:
-```bash
-bash src/dotfiles.sh init
-bash src/dotfiles.sh setup
-bash src/dotfiles.sh sync
-bash src/dotfiles.sh restore
-bash src/dotfiles.sh status
-```
+- show the active config file and edit settings
+- run package and extension workflows
+- export a configuration ZIP for migration
+- restore another machine from that ZIP
+- manage dotfiles with either:
+  - `drive` mode: shared folder plus symlink setup
+  - `zip` mode: snapshot export/import
 
-You can also sync specific targets (packages, Obsidian vault, VS Code) using subcommands.
+For drive-based dotfiles sync, the important point is:
 
-## Tests
+- `setup` creates symlinks
+- once the symlinks point into a drive-backed folder, your drive client provides the practical automatic sync
+- no cron job is needed for that workflow
 
-Run local checks:
-```bash
-bash test/test.sh
-```
+## Repository Layout
 
-## License
+- `src/`: shell scripts and configuration files
+- `ui/`: Flask + pywebview desktop interface
+- `test/`: regression and E2E tests
+- `.github/workflows/`: CI and release automation
 
-See [LICENSE](LICENSE)
+## Local Development
 
----
+Run the CLI checks:
 
-If you want, I can also:
-- prepare a short `CONTRIBUTING.md` with how to test and add packages, or
-- update `ui/README.md` to match this style.
-
-```
-
-Optional `.env.local` variables (used by [src/init.sh](src/init.sh) to run import automatically at the end of initialization):
-- `WIFI_KDBX_DB="/path/to/vault.kdbx"`
-- `WIFI_KDBX_GROUP="Wi‑Fi"` (default)
-- `WIFI_KDBX_KEY_FILE="/path/to/keyfile.key"` (if needed)
-- `WIFI_KDBX_ASK_PASS=1` to force interactive password prompt (do not store passwords in files/env)
-- `WIFI_KDBX_DRY_RUN=1` to simulate actions
-
-Useful options:
-- `--key-file <file>` : if the vault uses a keyfile
-- `--dry-run` : show actions without modifying the system
-- Authentication: let keepassxc-cli prompt for the password, or export `KEEPASSXC_CLI_PASSWORD` before running the script
-- See the script: [src/wifi_from_kdbx.sh](src/wifi_from_kdbx.sh)
-
-## Tests des scripts
-
-Exécuter les vérifications locales :
 ```bash
 bash test/test.sh
 ```
 
-Le script vérifie :
-- **Syntaxe bash** : `bash -n` sur tous les scripts
-- **Lint** : `shellcheck` si disponible
-- **Structure** : présence de répertoires et fichiers requis
-- **Format packages.conf** : colonnes avec séparateurs `|` valides
-- **VERSION** : format sémantique `X.Y.Z`
-- **Permissions** : scripts marqués comme exécutables
+Run the Python/UI tests:
 
-## Build / CI / Releases
-
-### Build local
-
-Créer une archive locale des scripts :
 ```bash
-tar -czf init-mac-scripts.tar.gz -C src .
+source .venv/bin/activate
+pytest test/test_app.py test/test_services.py test/test_api_e2e_full.py -q
 ```
 
-### GitHub Actions CI
+Run the UI in development:
 
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) : à chaque push, compile et publie les scripts comme artefact
-- [.github/workflows/release.yml](.github/workflows/release.yml) : à chaque tag `v*`, crée une release GitHub avec les scripts
-
-### Créer une release
-
-1. Mettre à jour [VERSION](VERSION)
-2. Commiter
-3. Créer un tag et pousser :
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+source .venv/bin/activate
+python ui/app.py
 ```
 
-GitHub Actions crée la release automatiquement.
+Build the desktop UI locally:
+
+```bash
+cd ui
+sh build.sh
+```
+
+## GitHub Releases
+
+To publish a release:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The release workflow will:
+
+1. create a GitHub Release
+2. attach a CLI ZIP for script-only users
+3. build and attach compiled UI archives for supported operating systems
 
 ## License
 
-Voir le fichier [LICENSE](LICENSE)
-
-## okc — utilitaire rapide
-
-Le script `okc` permet d'appeler rapidement les scripts présents dans `src/` sans préfixer par `bash src/...`.
-
-Exemples :
-
-```bash
-okc init                # lance src/init.sh
-okc app install firefox # lance src/app.sh install firefox
-okc dotfiles sync       # lance src/dotfiles.sh sync
-okc packages sync       # alias géré via src/dotfiles.sh packages
-```
-
-Installation recommandée (copie/symlink dans votre PATH) :
-
-```bash
-chmod +x okc install_okc.sh
-./install_okc.sh
-# ou (installation système)
-sudo ./install_okc.sh
-```
-
-Le script `install_okc.sh` installe `okc` dans `/usr/local/bin` si possible, sinon dans `~/.local/bin` et ajoute `~/.local/bin` à `~/.profile` si nécessaire.
-
-Vous pouvez aussi installer manuellement :
-
-```bash
-chmod +x okc
-sudo ln -sf "$PWD/okc" /usr/local/bin/okc
-```
-
-Après installation, exécutez `okc` depuis n'importe où.
+See [LICENSE](LICENSE).

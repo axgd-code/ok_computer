@@ -1,0 +1,53 @@
+<section class="hero-card">
+    <div>
+        <p class="eyebrow">Step 1</p>
+        <h2>Initialization</h2>
+        <p class="hero-copy">Prepare a new computer from an existing backup, recover what is already installed on this machine, then bootstrap the workstation with the same baseline.</p>
+    </div>
+    <div class="hero-actions">
+        <button onclick="startInitFromZip()">Import configuration zip</button>
+        <button class="secondary" onclick="switchTab('customization')">Review configuration</button>
+    </div>
+</section>
+
+<div class="stage-grid two-col">
+    <div class="card action-card">
+        <div class="section-title">Restore from Backup</div>
+        <p>Load packages, extensions, environment settings and system settings from a previously exported zip.</p>
+        <button onclick="startInitFromZip()" data-i18n="init_from_zip">Initialize from zip file</button>
+        <p class="micro-copy" data-i18n="init_from_zip_desc">Loads env, packages and extensions from configuration zip</p>
+        <div class="progress-shell" style="margin-top:14px;">
+            <div class="progress-bar-track">
+                <div id="init-progress-bar" class="progress-bar-fill"></div>
+            </div>
+            <div id="init-progress-text" class="progress-caption"></div>
+        </div>
+    </div>
+
+    <div class="card action-card">
+        <div class="section-title">Detect Current Machine</div>
+        <p>Capture the current state of this machine to seed your shared configuration before exporting it.</p>
+        <div class="button-stack">
+            <button class="secondary" onclick="importInstalled()" data-i18n="import_installed">Import Installed Packages</button>
+            <button class="secondary" onclick="importInstalledExtensions()">Import Installed Extensions</button>
+            <button class="secondary" onclick="promptWifiExport()" data-i18n="export_wifi">Export Wi-Fi to KeePassXC</button>
+        </div>
+        <p class="micro-copy">Use these actions when the current computer already contains software or Wi-Fi networks you want to preserve.</p>
+    </div>
+</div>
+
+<div class="card action-card">
+    <div class="section-title">Post-Initialization Maintenance</div>
+    <p data-i18n="maintenance_desc">Run system updates (brew upgrade, update packages.conf, etc.)</p>
+    <div class="button-row wrap">
+        <button onclick="runUpdate()" id="btn-update" data-i18n="run_update">Run Update Now</button>
+        <label class="inline-toggle">
+            <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate()">
+            <span data-i18n="auto_update_toggle">Automatic packages update</span>
+        </label>
+        <span id="auto-update-status" class="micro-copy"></span>
+    </div>
+    <div id="update-output" style="margin-top: 15px; display: none;">
+        <pre id="update-log"></pre>
+    </div>
+</div>

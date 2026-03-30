@@ -2,7 +2,13 @@
 
 # Ensure running under Bash (required for mapfile, process substitution, arrays)
 if [ -z "${BASH_VERSION:-}" ]; then
-    echo "This script requires Bash. Run with: bash $0" >&2
+    echo "This script requires Bash 4+. Current: ${BASH_VERSION:-none}" >&2
+    exit 2
+fi
+
+# Bash version check (need 4+ for associative arrays, though this script uses 3+ features)
+if [ "${BASH_VERSINFO[0]}" -lt 3 ]; then
+    echo "This script requires Bash 3.0 or newer. Found: ${BASH_VERSION}" >&2
     exit 2
 fi
 
@@ -64,7 +70,7 @@ os_detect() {
 
 kp_attr() {
     local attr="$1" entry_path="$2" value=""
-    if value=$(keepassxc-cli show -q ${KEY_FILE:+--key-file "$KEY_FILE"} -a "$attr" "$DB_FILE" "$entry_path" 2>/dev/null); then
+    if value=$(keepassxc-cli show -q ${KEY_FILE:+--key-file "$KEY_FILE"} -a "$attr" "$DB_FILE" "$entry_path" </dev/tty 2>/dev/null); then
         echo "$value"
     else
         echo ""
@@ -72,7 +78,7 @@ kp_attr() {
 }
 
 list_entries() {
-    keepassxc-cli ls ${KEY_FILE:+--key-file "$KEY_FILE"} "$DB_FILE" "$GROUP" \
+    keepassxc-cli ls ${KEY_FILE:+--key-file "$KEY_FILE"} "$DB_FILE" "$GROUP" </dev/tty \
         | sed 's:^ *::; s:/$::' \
         | awk 'NF > 0 && $0 !~ /\/$/'
 }

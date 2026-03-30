@@ -1,0 +1,17 @@
+<div class="card">
+    <div class="section-title">Browser Extensions</div>
+    <p>Manage configured extensions and uninstall installed ones directly from a single list.</p>
+
+    <div style="margin-bottom:10px; display:flex; gap:8px;">
+        <button onclick="refreshExtensions()" class="secondary">Refresh</button>
+    </div>
+
+    <div id="extensions-list">Loading...</div>
+
+    <div style="margin-top:12px; display:flex; gap:8px;">
+        <button onclick="saveExtensions()">Save List</button>
+        <button onclick="installExtensions(this)" class="secondary">Install Extensions</button>
+    </div>
+
+    <div id="extensions-output" style="margin-top:12px; display:none;"></div>
+</div>

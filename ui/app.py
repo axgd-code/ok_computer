@@ -1,441 +1,545 @@
-from flask import Flask, jsonify, request, render_template, send_from_directory
-from dotenv import load_dotenv, set_key
+from flask import Flask, render_template, send_from_directory
+from dotenv import load_dotenv
 import os
 import requests
 from pathlib import Path
-import multiprocessing
-import socket
-import webview
 import subprocess
 import threading
+import shutil
 import sys
-import re
+import platform
+from urllib.parse import quote as _urlquote
+from datetime import datetime
+import app_config as cfg
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-ENV_LOCAL = BASE_DIR / '.env.local'
-ENV_EXAMPLE = BASE_DIR / '.env.example'
-PACKAGES_CONF = BASE_DIR / 'src' / 'packages.conf'
+UI_DIR = cfg.UI_DIR
+if str(UI_DIR) not in sys.path:
+    sys.path.insert(0, str(UI_DIR))
+import extensions_service as ext_svc
+import preferences_service as pref_svc
+import packages_service as pkg_svc
+import automation_service as auto_svc
+import actions_service as act_svc
+import runtime_helpers as rt_h
+import platform_helpers as pf_h
+import bootstrap as boot_svc
+from application.container import build_use_cases
+from routes import register_blueprints
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+PATHS = cfg.resolve_app_paths()
+BASE_DIR = PATHS.base_dir
+USER_APP_DIR = PATHS.user_app_dir
+USER_SRC_DIR = PATHS.user_src_dir
+ENV_LOCAL_HOME = PATHS.env_local_home
+ENV_LOCAL_REPO = PATHS.env_local_repo
+ENV_LOCAL = PATHS.env_local
+ENV_EXAMPLE = PATHS.env_example
+PACKAGES_CONF = PATHS.packages_conf
+SYSTEM_SETTINGS_CONF = PATHS.system_settings_conf
+
+if ENV_LOCAL and Path(ENV_LOCAL).exists():
+    load_dotenv(dotenv_path=ENV_LOCAL, override=False)
+
+INIT_JOBS = {}
+INIT_JOBS_LOCK = threading.Lock()
+EXTENSIONS_INSTALL_LOCK = threading.Lock()
+
+def create_app():
+    return Flask(__name__, static_folder='static', template_folder='templates')
+
+
+app = create_app()
+
+
+AUTOMATION_STATE = dict(cfg.AUTOMATION_STATE_DEFAULTS)
+AUTOMATION_LOCK = threading.Lock()
+AUTOMATION_THREAD = None
+LEGACY_HIDDEN_ENV_KEYS = set(cfg.LEGACY_HIDDEN_ENV_KEYS)
+
+PACKAGES_SERVICE = None
+
+
+def _set_exec_if_possible(path_obj):
+    rt_h.set_exec_if_possible(path_obj)
+
+
+def _copy_if_newer(src, dst):
+    return rt_h.copy_if_newer(src, dst)
+
+
+def _find_src_candidates():
+    return rt_h.find_src_candidates(BASE_DIR)
+
+
+def ensure_user_scripts_available():
+    return rt_h.ensure_user_scripts_available(BASE_DIR, USER_APP_DIR, USER_SRC_DIR)
+
+
+try:
+    ensure_user_scripts_available()
+except Exception:
+    pass
+
+
+# --- Robust script/file resolution for dev & PyInstaller modes -------------
+def find_script(name):
+    return rt_h.find_script(name, USER_SRC_DIR, BASE_DIR)
+
+
+def find_conf_file(name):
+    shared_conf = _shared_conf_path(name) if name in {'packages.conf', 'extensions.conf', 'system_settings.conf'} else None
+    if shared_conf and shared_conf.exists():
+        return shared_conf
+    return rt_h.find_conf_file(name, USER_SRC_DIR, BASE_DIR)
+
+
+def _run_script_with_optional_admin(script_path, args=None, timeout=None, require_admin=False, extra_env=None):
+    return rt_h.run_script_with_optional_admin(
+        script_path,
+        args=args,
+        timeout=timeout,
+        require_admin=require_admin,
+        extra_env=extra_env,
+    )
+
+# --- Logging configuration -------------------------------------------------
+import logging
+from logging.handlers import RotatingFileHandler
+
+LOG_DIR = BASE_DIR / 'logs'
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+log_file = LOG_DIR / cfg.LOG_FILE_NAME
+handler = RotatingFileHandler(str(log_file), maxBytes=cfg.LOG_MAX_BYTES, backupCount=cfg.LOG_BACKUP_COUNT)
+formatter = logging.Formatter('%(asctime)s %(levelname)s [%(name)s] %(message)s')
+handler.setFormatter(formatter)
+handler.setLevel(logging.INFO)
+
+# Attach to Flask logger
+app.logger.setLevel(logging.INFO)
+if not any(isinstance(h, RotatingFileHandler) for h in app.logger.handlers):
+    app.logger.addHandler(handler)
+
+import logging as _root_logging
+if not _root_logging.getLogger().handlers:
+    _root_logging.basicConfig(level=_root_logging.INFO)
+
+# Ensure root logger and werkzeug also write to the rotating file
+try:
+    root_logger = _root_logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    if not any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers):
+        root_logger.addHandler(handler)
+    werk_logger = _root_logging.getLogger('werkzeug')
+    if not any(isinstance(h, RotatingFileHandler) for h in werk_logger.handlers):
+        werk_logger.addHandler(handler)
+except Exception:
+    pass
+
+PACKAGES_SERVICE = pkg_svc.PackagesService(logger=app.logger)
+
+
+def _preferences_service():
+    return pref_svc.PreferencesService(
+        env_local=ENV_LOCAL,
+        env_example=ENV_EXAMPLE,
+        env_local_repo=ENV_LOCAL_REPO,
+        legacy_hidden_env_keys=LEGACY_HIDDEN_ENV_KEYS,
+        logger=app.logger,
+        sync_env_to_repo=_sync_env_to_repo_if_possible,
+    )
+
+
+def _automation_service():
+    return auto_svc.AutomationService(
+        logger=app.logger,
+        load_env_dict_fn=load_env_dict,
+        env_local_getter=lambda: ENV_LOCAL,
+        packages_conf_getter=lambda: PACKAGES_CONF,
+        find_conf_file_fn=find_conf_file,
+        base_dir_getter=lambda: BASE_DIR,
+        system_settings_conf_path_fn=_system_settings_conf_path,
+        export_dotfiles_entries_fn=lambda: _actions_service().dotfiles_export_entries(),
+        run_update_script_fn=_run_update_script,
+        cron_available_fn=_cron_available,
+        read_crontab_lines_fn=_read_crontab_lines,
+        cron_update_tag=CRON_UPDATE_TAG,
+    )
+
+
+def _actions_service():
+    return act_svc.ActionsService(
+        logger=app.logger,
+        base_dir_getter=lambda: BASE_DIR,
+        env_local_getter=lambda: ENV_LOCAL,
+        runtime_src_dir_fn=_runtime_src_dir,
+        sync_env_to_repo_fn=_sync_env_to_repo_if_possible,
+        find_script_fn=find_script,
+        run_script_with_optional_admin_fn=_run_script_with_optional_admin,
+        remove_package_from_conf_fn=remove_package_from_conf,
+        load_env_dict_fn=load_env_dict,
+    )
+
+
+class AppState:
+    pass
+
+
+STATE = AppState()
+
 
 # Load environment
-def load_env_dict():
-    # 1. Parse example to get keys and comments
-    schema = []
-    if ENV_EXAMPLE.exists():
-        with ENV_EXAMPLE.open() as f:
-            last_comment = ""
-            for line in f:
-                line = line.strip()
-                if not line:
-                     last_comment = ""
-                     continue
-                if line.startswith('#'):
-                     last_comment += line.lstrip('#').strip() + " "
-                     continue
-                if '=' in line:
-                     k, v = line.split('=', 1)
-                     schema.append({'key': k.strip(), 'default': v.strip().strip('"'), 'desc': last_comment.strip()})
-                     last_comment = ""
-    
-    # 2. Load actual values from .env.local
-    current = {}
-    if ENV_LOCAL.exists():
-        load_dotenv(dotenv_path=ENV_LOCAL, override=False)
-        with ENV_LOCAL.open() as f:
-            for line in f:
-                line=line.strip()
-                if not line or line.startswith('#') or '=' not in line:
-                    continue
-                k,v=line.split('=',1)
-                current[k.strip()]=v.strip().strip('"')
+def _sync_env_to_repo_if_possible():
+    try:
+        if ENV_LOCAL.exists():
+            ENV_LOCAL_REPO.write_text(ENV_LOCAL.read_text())
+    except Exception:
+        pass
 
-    # Merge
-    final_list = []
-    seen = set()
-    # Add items from schema
-    for item in schema:
-        key = item['key']
-        val = current.get(key, item['default'])
-        final_list.append({'key': key, 'value': val, 'desc': item['desc']})
-        seen.add(key)
-    
-    # Add extra items from current that were not in schema
-    for k, v in current.items():
-        if k not in seen:
-            final_list.append({'key': k, 'value': v, 'desc': 'Custom setting'})
-            
-    return final_list
+
+def _str_to_bool(raw, default=False):
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _int_from_env(raw, default_value, min_value=1, max_value=10080):
+    try:
+        val = int(str(raw).strip())
+    except Exception:
+        return default_value
+    return max(min_value, min(max_value, val))
+
+
+def _safe_iso_now():
+    return datetime.now().isoformat(timespec='seconds')
+
+
+def _runtime_src_dir():
+    if USER_SRC_DIR.exists():
+        return USER_SRC_DIR
+    return BASE_DIR / 'src'
+
+
+def _shared_root_dir():
+    sync_dir = _env_map().get('SYNC_DIR', '')
+    if not sync_dir:
+        return None
+    return cfg.resolve_shared_root(sync_dir)
+
+
+def _shared_conf_path(name):
+    shared_root = _shared_root_dir()
+    if not shared_root:
+        return None
+    return shared_root / name
+
+
+def _config_target_path(name):
+    shared_conf = _shared_conf_path(name)
+    if shared_conf and shared_conf.parent.exists():
+        shared_conf.parent.mkdir(parents=True, exist_ok=True)
+        return shared_conf
+    runtime_src = _runtime_src_dir()
+    runtime_src.mkdir(parents=True, exist_ok=True)
+    return runtime_src / name
+
+
+CRON_UPDATE_TAG = cfg.CRON_UPDATE_TAG
+
+
+def _cron_available():
+    try:
+        return shutil.which('crontab') is not None
+    except Exception:
+        return False
+
+
+def _read_crontab_lines():
+    if not _cron_available():
+        return []
+    try:
+        res = subprocess.run(['crontab', '-l'], capture_output=True, text=True)
+        if res.returncode != 0:
+            return []
+        return (res.stdout or '').splitlines()
+    except Exception:
+        return []
+
+
+def _write_crontab_lines(lines):
+    if not _cron_available():
+        raise RuntimeError('crontab command not available')
+    payload = '\n'.join([ln for ln in lines if ln is not None]).strip('\n')
+    if payload:
+        payload += '\n'
+    res = subprocess.run(['crontab', '-'], input=payload, text=True, capture_output=True)
+    if res.returncode != 0:
+        raise RuntimeError((res.stderr or res.stdout or 'failed to write crontab').strip())
+
+
+def _build_update_cron_line():
+    runner_script, checked = find_script('cron_auto_update.sh')
+    if not runner_script:
+        raise RuntimeError(f'cron_auto_update.sh not found (checked={checked})')
+    return f'* * * * * /bin/bash "{runner_script}" >/dev/null 2>&1 {CRON_UPDATE_TAG}'
+
+
+def _remove_update_cron_job():
+    current = _read_crontab_lines()
+    kept = [ln for ln in current if CRON_UPDATE_TAG not in ln]
+    _write_crontab_lines(kept)
+
+
+def _apply_update_cron_job():
+    current = _read_crontab_lines()
+    kept = [ln for ln in current if CRON_UPDATE_TAG not in ln]
+    kept.append(_build_update_cron_line())
+    _write_crontab_lines(kept)
+
+
+def _sync_update_cron_from_env():
+    import platform
+    sysname = platform.system().lower()
+    if 'windows' in sysname or os.name == 'nt':
+        return {'mode': 'task-scheduler', 'applied': False, 'reason': 'cron unavailable on windows'}
+    if not _cron_available():
+        return {'mode': 'cron', 'applied': False, 'reason': 'crontab command not available'}
+
+    env = _env_map()
+    enabled = _str_to_bool(env.get('AUTO_UPDATE_ENABLED', 'false'))
+    if enabled:
+        _apply_update_cron_job()
+        return {'mode': 'cron', 'applied': True, 'enabled': True}
+
+    _remove_update_cron_job()
+    return {'mode': 'cron', 'applied': True, 'enabled': False}
+
+
+def load_env_dict():
+    return _preferences_service().load_env_dict()
+
+
+def _parse_env_example_schema():
+    return _preferences_service().parse_env_example_schema()
+
+
+def _read_env_keys(path):
+    return _preferences_service().read_env_keys(path)
+
+
+def _ensure_env_local_complete():
+    return _preferences_service().ensure_env_local_complete()
 
 # Packages parsing
 def read_packages():
-    packages = []
-    if PACKAGES_CONF.exists():
-        with PACKAGES_CONF.open() as f:
-            for line in f:
-                line=line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                parts=line.split('|')
-                # expected format: type|mac|win|desc
-                if len(parts) < 4:
-                    continue
-                pkg = {
-                    'type': parts[0],
-                    'mac': parts[1],
-                    'win': parts[2],
-                    'desc': parts[3]
-                }
-                packages.append(pkg)
-    return packages
+    shared_conf = _shared_conf_path('packages.conf')
+    packages_conf = shared_conf if shared_conf and shared_conf.exists() else PACKAGES_CONF
+    return PACKAGES_SERVICE.read_packages(packages_conf, find_conf_file)
+
+
+def remove_package_from_conf(app_name):
+    shared_conf = _shared_conf_path('packages.conf')
+    packages_conf = shared_conf if shared_conf and shared_conf.exists() else PACKAGES_CONF
+    return PACKAGES_SERVICE.remove_package_from_conf(app_name, packages_conf, find_conf_file)
+
+
+def _system_settings_conf_path():
+    shared_conf = _shared_conf_path('system_settings.conf')
+    conf = shared_conf if shared_conf and shared_conf.exists() else SYSTEM_SETTINGS_CONF if SYSTEM_SETTINGS_CONF.exists() else find_conf_file('system_settings.conf')
+    if conf and Path(conf).exists():
+        return Path(conf)
+    fallback = BASE_DIR / 'src' / 'system_settings.conf'
+    if fallback.exists():
+        return fallback
+    return BASE_DIR / 'src' / 'system_settings.conf.example'
+
+
+def parse_system_settings_conf():
+    return _preferences_service().parse_system_settings_conf(SYSTEM_SETTINGS_CONF, find_conf_file, BASE_DIR, _runtime_src_dir)
 
 # Simple availability checks
 def check_homebrew(app):
-    url_formula = f"https://formulae.brew.sh/api/formula/{app}.json"
-    url_cask = f"https://formulae.brew.sh/api/cask/{app}.json"
-    try:
-        r = requests.get(url_formula, timeout=5)
-        if r.status_code == 200 and 'name' in r.text:
-            return True
-    except Exception:
-        pass
-    try:
-        r = requests.get(url_cask, timeout=5)
-        if r.status_code == 200 and 'token' in r.text:
-            return True
-    except Exception:
-        pass
-    return False
+    return pf_h.check_homebrew(app)
 
 def check_chocolatey(app):
-    # Query Chocolatey OData endpoint
-    q = f"https://community.chocolatey.org/api/v2/Packages()?%24filter=tolower(Id)%20eq%20tolower(%27{app}%27)&%24select=Id"
-    try:
-        r = requests.get(q, timeout=6)
-        if r.status_code == 200 and app.lower() in r.text.lower():
-            return True
-    except Exception:
-        pass
-    return False
+    return pf_h.check_chocolatey(app)
 
 def check_debian(app):
-    try:
-        url = f"https://packages.debian.org/search?keywords={app}&searchon=names&suite=stable&section=all"
-        r = requests.get(url, timeout=6)
-        if r.status_code == 200 and 'Exact hits' in r.text:
-            return True
-    except Exception:
-        pass
-    return False
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/api/env', methods=['GET','POST'])
-def api_env():
-    if request.method == 'GET':
-        return jsonify(load_env_dict())
-    data = request.json or {}
-    # write keys back to .env.local
-    if not ENV_LOCAL.exists():
-        ENV_LOCAL.write_text('')
-    for k,v in data.items():
-        set_key(str(ENV_LOCAL), k, str(v))
-    return jsonify({'status':'ok'})
+    return PACKAGES_SERVICE.check_debian(app)
 
 
-@app.route('/api/env/exists')
-def api_env_exists():
-    try:
-        return jsonify({'exists': ENV_LOCAL.exists()})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def parse_extensions_conf():
+    return ext_svc.parse_extensions_conf(find_conf_file, BASE_DIR)
 
 
-@app.route('/api/env/init', methods=['POST'])
-def api_env_init():
-    try:
-        # If an example file exists, copy it as a starting point
-        if ENV_EXAMPLE.exists():
-            ENV_LOCAL.write_text(ENV_EXAMPLE.read_text())
-        else:
-            # create an empty .env.local
-            ENV_LOCAL.write_text('')
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/packages')
-def api_packages():
-    pkgs=read_packages()
-    return jsonify(pkgs)
-
-@app.route('/api/check')
-def api_check():
-    appname = request.args.get('app')
-    target = request.args.get('target','auto')
-    if not appname:
-        return jsonify({'error':'missing app parameter'}),400
-    result = {'app':appname,'available':False,'sources':{}}
-    # check homebrew
-    try:
-        hb = check_homebrew(appname)
-        result['sources']['homebrew']=hb
-        if hb:
-            result['available']=True
-    except Exception:
-        result['sources']['homebrew']=False
-    # check chocolatey
-    try:
-        ch = check_chocolatey(appname)
-        result['sources']['chocolatey']=ch
-        if ch:
-            result['available']=True
-    except Exception:
-        result['sources']['chocolatey']=False
-    # check debian
-    try:
-        de = check_debian(appname)
-        result['sources']['debian']=de
-        if de:
-            result['available']=True
-    except Exception:
-        result['sources']['debian']=False
-    return jsonify(result)
-
-@app.route('/api/icon')
-def api_icon():
-    name = request.args.get('name')
-    if not name or name == '-': 
-        return jsonify({'url': ''})
-
-    # Default fallback
-    fallback = f"https://ui-avatars.com/api/?name={name}&background=e1e1e1&color=333&size=64&font-size=0.4&length=2"
-    
-    # 1. Try Homebrew Cask (best for icons)
-    try:
-        r = requests.get(f"https://formulae.brew.sh/api/cask/{name}.json", timeout=1.5)
-        if r.status_code == 200:
-            hp = r.json().get('homepage')
-            if hp:
-                return jsonify({'url': f"https://www.google.com/s2/favicons?domain={hp}&sz=64"})
-    except:
-        pass
-    
-    # 2. Try Chocolatey
-    try:
-        url = f"https://community.chocolatey.org/api/v2/Packages()?$filter=tolower(Id) eq '{name.lower()}'&$select=IconUrl"
-        r = requests.get(url, timeout=1.5)
-        if r.status_code == 200:
-            m = re.search(r'<d:IconUrl>(.+?)</d:IconUrl>', r.text)
-            if m:
-                # Some choco icons are broken or http, assume https for safety if possible or just return
-                return jsonify({'url': m.group(1)})
-    except:
-        pass
-
-    return jsonify({'url': fallback})
-
-@app.route('/api/search')
-def api_search():
-    q = request.args.get('q')
-    store = request.args.get('store','all')
-    if not q:
-        return jsonify({'error':'missing q parameter'}),400
-    out = {'query':q,'store':store,'results':[]}
-    if store in ('all','homebrew'):
-        try:
-            r = requests.get(f"https://formulae.brew.sh/api/search?q={q}", timeout=6)
-            if r.status_code==200:
-                out['results'].append({'store':'homebrew','data':r.json()})
-        except Exception:
-            pass
-    if store in ('all','chocolatey'):
-        try:
-            r = requests.get(f"https://community.chocolatey.org/packages?search={q}", timeout=6)
-            out['results'].append({'store':'chocolatey','data':r.text})
-        except Exception:
-            pass
-    if store in ('all','debian'):
-        try:
-            r = requests.get(f"https://packages.debian.org/search?keywords={q}&searchon=names&suite=stable&section=all", timeout=6)
-            out['results'].append({'store':'debian','data':r.text})
-        except Exception:
-            pass
-    return jsonify(out)
-
-# static files
-@app.route('/static/<path:p>')
-def static_files(p):
-    return send_from_directory(os.path.join(os.path.dirname(__file__),'static'), p)
-
-@app.route('/api/action/update', methods=['POST'])
-def api_action_update():
-    # Run bash src/update.sh
-    script = BASE_DIR / 'src' / 'update.sh'
-    if not script.exists():
-        return jsonify({'error':'update script not found'}), 500
-    try:
-        # Run in background or wait? Wait for now to show status
-        # Note: on Windows this might fail if bash is not in PATH.
-        cmd = ['bash', str(script)]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/action/install', methods=['POST'])
-def api_action_install():
-    data = request.json or {}
-    app_name = data.get('app')
-    if not app_name:
-        return jsonify({'error':'missing app name'}), 400
-    
-    script = BASE_DIR / 'src' / 'app.sh'
-    try:
-        cmd = ['bash', str(script), 'install', app_name]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def scan_chrome_family_extensions():
+    return ext_svc.scan_chrome_family_extensions()
 
 
-@app.route('/api/action/import-installed', methods=['POST'])
-def api_action_import_installed():
-    # Run bash src/import_installed.sh
-    def find_script(name):
-        candidates = []
-        # repo-relative (dev mode)
-        candidates.append(BASE_DIR / 'src' / name)
-        # current working dir
-        candidates.append(Path.cwd() / 'src' / name)
-        # next to the executable (one-dir builds)
-        candidates.append(Path(sys.executable).parent / 'src' / name)
-        # PyInstaller onefile unpack dir
-        meipass = getattr(sys, '_MEIPASS', None)
-        if meipass:
-            candidates.append(Path(meipass) / 'src' / name)
+_normalize_text = ext_svc._normalize_text
+_firefox_icon_from_payload = ext_svc._firefox_icon_from_payload
+_fetch_firefox_addon_payload = ext_svc._fetch_firefox_addon_payload
+_search_firefox_addons = ext_svc._search_firefox_addons
+_pick_firefox_search_result = ext_svc._pick_firefox_search_result
+_resolve_firefox_addon_details = ext_svc._resolve_firefox_addon_details
+_resolve_firefox_addon_slug = ext_svc._resolve_firefox_addon_slug
+_fetch_firefox_icon_from_mozilla = ext_svc._fetch_firefox_icon_from_mozilla
 
-        found = None
-        checked = []
-        for c in candidates:
-            checked.append(str(c))
-            if c.exists():
-                found = c
-                break
-        return found, checked
 
-    script_name = 'import_installed.sh'
-    script, checked = find_script(script_name)
-    if not script:
-        return jsonify({'error': f"{script_name} script not found", 'checked': checked}), 500
+def scan_firefox_extensions():
+    return ext_svc.scan_firefox_extensions()
 
-    try:
-        cmd = ['bash', str(script)]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode, 'used': str(script)})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/action/wifi-export', methods=['POST'])
-def api_action_wifi_export():
-    data = request.json or {}
-    db_path = data.get('db')
-    password = data.get('password')
-    
-    if not db_path:
-        # try loading from env
-        env = load_env_dict()
-        db_path = env.get('WIFI_KDBX_DB')
-    
-    if not db_path:
-         return jsonify({'error':'No DB path provided and WIFI_KDBX_DB not set'}), 400
-    if not password:
-         return jsonify({'error':'Password is required'}), 400
+def scan_local_extensions():
+    return ext_svc.scan_local_extensions()
 
-    script = BASE_DIR / 'src' / 'wifi_from_keychain.sh'
-    if not script.exists():
-         return jsonify({'error':'wifi_from_keychain.sh script not found'}), 500
 
-    env = os.environ.copy()
-    env['KEEPASS_DB_PASS'] = password
-    
-    # We pass the DB path as argument
-    cmd = ['bash', str(script), '--db', db_path]
-    
-    try:
-        # Run process
-        res = subprocess.run(cmd, env=env, capture_output=True, text=True)
-        return jsonify({'stdout': res.stdout, 'stderr': res.stderr, 'code': res.returncode})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def uninstall_chrome_extension(ext_id):
+    return pf_h.uninstall_chrome_extension(ext_id)
 
-def is_port_in_use(port):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
 
-def start_server(port):
-    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+def uninstall_firefox_extension(addon_id):
+    return pf_h.uninstall_firefox_extension(addon_id)
 
-if __name__=='__main__':
-    multiprocessing.freeze_support()
-    
-    port = int(os.environ.get('PORT', 5000))
-    if is_port_in_use(port):
-        # In --noconsole mode, avoid print() as it might crash on Windows
-        # print(f" * Port {port} is in use. Trying to find another port...")
-        if port == 5000:
-            port = 5001
-        while is_port_in_use(port):
-            port += 1
-            if port > 5010: # Limit searches
-                break
-    
-    # Start Flask in a thread
-    t = threading.Thread(target=start_server, args=(port,), daemon=True)
-    t.start()
 
-    # Provide a small JS API to open native file/folder dialogs when running
-    # inside the pywebview window. Fall back to prompt in browsers.
-    class FileDialogApi:
-        def __init__(self):
-            # Window will be set after creation
-            self.window = None
+def uninstall_extension(browser, ext_id):
+    return pf_h.uninstall_extension(browser, ext_id)
 
-        def open_file(self, title="Select file"):
-            try:
-                # Use pywebview native dialog if available
-                if self.window:
-                    res = webview.create_file_dialog(self.window, webview.OPEN_DIALOG)
-                    # pywebview returns a list for multiple selections
-                    if isinstance(res, (list, tuple)):
-                        return res[0] if res else ""
-                    return res or ""
-            except Exception:
-                pass
-            return ""
+def _run_update_script(timeout=300):
+    return _actions_service().run_update_script(timeout=timeout)
 
-        def open_dir(self, title="Select folder"):
-            try:
-                if self.window:
-                    res = webview.create_file_dialog(self.window, webview.FOLDER_DIALOG)
-                    if isinstance(res, (list, tuple)):
-                        return res[0] if res else ""
-                    return res or ""
-            except Exception:
-                pass
-            return ""
+def _env_map():
+    return _automation_service().env_map()
 
-    api = FileDialogApi()
 
-    # Create webview window and expose the API to JS via `window.pywebview.api`
-    try:
-        window = webview.create_window('ok_computer', f'http://localhost:{port}', js_api=api)
-        api.window = window
-    except TypeError:
-        # Older pywebview versions or contexts where js_api isn't supported
-        window = webview.create_window('ok_computer', f'http://localhost:{port}')
+def _default_export_dir():
+    return _automation_service().default_export_dir()
 
-    webview.start()
+
+def _default_export_path():
+    return _automation_service().default_export_path()
+
+
+def _export_configuration(out_path):
+    return _automation_service().export_configuration(out_path)
+
+
+def _update_automation_state(**kwargs):
+    _automation_service().update_state(AUTOMATION_STATE, AUTOMATION_LOCK, **kwargs)
+
+
+def _run_scheduled_update():
+    return _automation_service().run_scheduled_update(
+        AUTOMATION_STATE,
+        AUTOMATION_LOCK,
+        timeout=cfg.AUTOMATION_SCHEDULED_UPDATE_TIMEOUT_SEC,
+    )
+
+
+def _run_scheduled_export(path_override=None):
+    return _automation_service().run_scheduled_export(AUTOMATION_STATE, AUTOMATION_LOCK, path_override=path_override)
+
+
+def _automation_loop():
+    return _automation_service().automation_loop(AUTOMATION_STATE, AUTOMATION_LOCK)
+
+
+def start_automation_scheduler_if_needed():
+    global AUTOMATION_THREAD
+    with AUTOMATION_LOCK:
+        if AUTOMATION_THREAD and AUTOMATION_THREAD.is_alive():
+            return False
+        AUTOMATION_THREAD = threading.Thread(target=_automation_loop, daemon=True, name='okc-automation')
+        AUTOMATION_THREAD.start()
+        return True
+
+
+def _auto_update_status_for_os():
+    return _automation_service().auto_update_status_for_os()
+
+
+def _run_init_from_zip_job(job_id, zip_path):
+    return _actions_service().run_init_from_zip_job(job_id, zip_path, INIT_JOBS, INIT_JOBS_LOCK)
+
+
+def _run_init_from_shared_job(job_id):
+    return _actions_service().run_init_from_shared_job(job_id, INIT_JOBS, INIT_JOBS_LOCK)
+
+
+def _populate_state():
+    use_cases = build_use_cases(STATE)
+    state_values = {
+        '__file__': __file__,
+        'app': app,
+        'BASE_DIR': BASE_DIR,
+        'USER_APP_DIR': USER_APP_DIR,
+        'USER_SRC_DIR': USER_SRC_DIR,
+        'ENV_LOCAL': ENV_LOCAL,
+        'ENV_EXAMPLE': ENV_EXAMPLE,
+        'ENV_LOCAL_REPO': ENV_LOCAL_REPO,
+        'PACKAGES_CONF': PACKAGES_CONF,
+        'SYSTEM_SETTINGS_CONF': SYSTEM_SETTINGS_CONF,
+        'PACKAGES_SERVICE': PACKAGES_SERVICE,
+        'AUTOMATION_STATE': AUTOMATION_STATE,
+        'AUTOMATION_THREAD': AUTOMATION_THREAD,
+        'EXTENSIONS_INSTALL_LOCK': EXTENSIONS_INSTALL_LOCK,
+        'INIT_JOBS': INIT_JOBS,
+        'INIT_JOBS_LOCK': INIT_JOBS_LOCK,
+        'platform': platform,
+        'render_template': render_template,
+        'send_from_directory': send_from_directory,
+        '_urlquote': _urlquote,
+        'ensure_user_scripts_available': ensure_user_scripts_available,
+        'find_script': find_script,
+        'find_conf_file': find_conf_file,
+        'load_env_dict': load_env_dict,
+        'read_packages': read_packages,
+        'parse_system_settings_conf': parse_system_settings_conf,
+        'parse_extensions_conf': parse_extensions_conf,
+        'scan_local_extensions': scan_local_extensions,
+        'uninstall_extension': uninstall_extension,
+        'check_homebrew': check_homebrew,
+        'check_chocolatey': check_chocolatey,
+        'check_debian': check_debian,
+        '_run_script_with_optional_admin': _run_script_with_optional_admin,
+        '_sync_env_to_repo_if_possible': _sync_env_to_repo_if_possible,
+        '_ensure_env_local_complete': _ensure_env_local_complete,
+        '_runtime_src_dir': _runtime_src_dir,
+        '_actions_service': _actions_service,
+        '_automation_service': _automation_service,
+        '_run_update_script': _run_update_script,
+        '_env_map': _env_map,
+        '_shared_root_dir': _shared_root_dir,
+        '_shared_conf_path': _shared_conf_path,
+        '_config_target_path': _config_target_path,
+        '_default_export_path': _default_export_path,
+        '_export_configuration': _export_configuration,
+        '_auto_update_status_for_os': _auto_update_status_for_os,
+        '_sync_update_cron_from_env': _sync_update_cron_from_env,
+        '_apply_update_cron_job': _apply_update_cron_job,
+        '_remove_update_cron_job': _remove_update_cron_job,
+        '_read_crontab_lines': _read_crontab_lines,
+        '_str_to_bool': _str_to_bool,
+        '_run_init_from_zip_job': _run_init_from_zip_job,
+        '_run_init_from_shared_job': _run_init_from_shared_job,
+        'start_automation_scheduler_if_needed': start_automation_scheduler_if_needed,
+        'USE_CASES': use_cases,
+    }
+    for key, value in state_values.items():
+        setattr(STATE, key, value)
+
+
+_populate_state()
+register_blueprints(app, STATE)
+
+
+@app.before_request
+def _refresh_state_before_request():
+    _populate_state()
+
+
+if __name__ == '__main__':
+    boot_svc.run_main(STATE)

@@ -1,13 +1,37 @@
 <div class="card">
     <div class="section-title" data-i18n="search_package">Search Package</div>
-    <div style="display:flex; gap:10px;">
-        <input type="text" id="search-input" placeholder="e.g. firefox, git..." data-i18n="search_placeholder">
-        <button onclick="doSearch()" data-i18n="search_btn">Search</button>
+    <div style="display:flex; gap:10px; align-items:center;">
+        <select id="search-kind" style="max-width:220px;">
+            <option value="package" data-i18n="search_mode_packages">Packages</option>
+            <option value="extension" data-i18n="search_mode_extensions">Browser extensions</option>
+        </select>
+        <input type="text" id="search-input" style="flex:1;" placeholder="e.g. firefox, git..."
+               onkeydown="if(event.key==='Enter')doSearch()">
+        <button id="search-btn" onclick="doSearch()" data-i18n="search_btn">Search</button>
     </div>
-    <select id="search-store" style="margin-top:10px; padding:5px;">
-        <option value="all" data-i18n="all_stores">All Stores</option>
-        <option value="homebrew">Homebrew (Mac)</option>
-        <option value="chocolatey">Chocolatey (Win)</option>
-    </select>
     <div id="search-results" style="margin-top:20px;"></div>
+</div>
+
+<!-- Add-to-list modal -->
+<div id="add-pkg-modal" class="modal-overlay" style="display:none;"
+     onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-card small">
+        <div class="modal-title" data-i18n="add_to_list">Add to my list</div>
+        <label style="font-size:12px;color:#666;" data-i18n="pkg_type">Type</label>
+        <select id="add-pkg-type" class="modal-input">
+            <option value="brew">brew (formula)</option>
+            <option value="cask">cask (macOS GUI app)</option>
+        </select>
+        <label style="font-size:12px;color:#666;" data-i18n="pkg_mac">Homebrew name (Mac)</label>
+        <input id="add-pkg-mac" class="modal-input" placeholder="-">
+        <label style="font-size:12px;color:#666;" data-i18n="pkg_win">Chocolatey ID (Win)</label>
+        <input id="add-pkg-win" class="modal-input" placeholder="-">
+        <label style="font-size:12px;color:#666;" data-i18n="pkg_desc">Description</label>
+        <input id="add-pkg-desc" class="modal-input" placeholder="…">
+        <div class="modal-footer">
+            <button onclick="document.getElementById('add-pkg-modal').style.display='none'"
+                    data-i18n="cancel">Cancel</button>
+            <button onclick="confirmAddPackage()" data-i18n="add_to_list">Add</button>
+        </div>
+    </div>
 </div>

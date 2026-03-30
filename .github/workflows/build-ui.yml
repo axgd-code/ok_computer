@@ -1,10 +1,10 @@
-name: Build UI executables
+name: build-ui
 
 on:
   push:
+    branches: ["main"]
   pull_request:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,41 +17,35 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r ui/requirements.txt
+          python -m pip install -r ui/requirements.txt -r ui/requirements.conf
 
       - name: Build executable
         run: |
-          # choose separator for add-data
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then SEP=';'; else SEP=':'; fi
-          python -m PyInstaller --name ok_computer_ui-${{ matrix.os }} --onefile \
+          cd ui
+          python -m PyInstaller --name ok_computer_ui-${{ matrix.os }} --onedir --noconfirm --clean \
             --noconsole \
-            --add-data "ui/templates${SEP}templates" \
-            --add-data "ui/static${SEP}static" \
+            --add-data "../.env.example${SEP}." \
+            --add-data "templates${SEP}templates" \
+            --add-data "static${SEP}static" \
+            --add-data "../src${SEP}src" \
             --collect-submodules flask \
             --hidden-import socket \
             --hidden-import webview \
             --hidden-import webview.platforms.cocoa \
             --hidden-import webview.platforms.winforms \
-            ui/app.py
+            app.py
         shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ok_computer_ui-${{ matrix.os }}
-          path: dist/*
-
-      - name: Upload binaries to GitHub Release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: dist/**
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ui/dist/**

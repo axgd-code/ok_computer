@@ -4,41 +4,85 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ok_computer</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
+    <link rel="shortcut icon" href="/static/img/logo.svg">
+    <link rel="apple-touch-icon" href="/static/img/logo.svg">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
-        <h1>ok_computer</h1>
-        
-        <div class="tabs">
-            <div class="tab active" onclick="switchTab('dashboard')" data-i18n="dashboard">Dashboard</div>
-            <div class="tab" onclick="switchTab('packages')" data-i18n="packages">Packages</div>
-            <div class="tab" onclick="switchTab('search')" data-i18n="search">Search & Install</div>
-            <div class="tab" onclick="switchTab('settings')" data-i18n="settings">Settings</div>
+        <header class="app-shell-header">
+            <div class="app-brand">
+                <div class="app-logo" aria-hidden="true">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img">
+                        <defs>
+                            <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#667EEA"></stop>
+                                <stop offset="50%" stop-color="#764BA2"></stop>
+                                <stop offset="100%" stop-color="#F093FB"></stop>
+                            </linearGradient>
+                        </defs>
+                        <path d="M 100 20
+                                 C 144.18 20 180 55.82 180 100
+                                 C 180 144.18 144.18 180 100 180
+                                 C 55.82 180 20 144.18 20 100
+                                 C 20 55.82 55.82 20 100 20
+                                 Z
+                                 M 100 50
+                                 C 72.39 50 50 72.39 50 100
+                                 C 50 127.61 72.39 150 100 150
+                                 C 127.61 150 150 127.61 150 100
+                                 C 150 72.39 127.61 50 100 50
+                                 Z
+                                 M 100 70
+                                 L 100 130
+                                 L 105 130
+                                 C 121.57 130 135 116.57 135 100
+                                 C 135 83.43 121.57 70 105 70
+                                 L 100 70
+                                 Z"
+                              fill="url(#logoGradient)"
+                              fill-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <div class="app-brand-copy">
+                    <p class="app-kicker">Workstation setup workflow</p>
+                    <h1>ok_computer</h1>
+                    <p class="app-subtitle">Initialize a new machine, customize the shared baseline, then export it to your synchronized drive.</p>
+                </div>
+            </div>
+            <div class="theme-control">
+                <label for="theme-mode">Theme</label>
+                <select id="theme-mode" onchange="setThemeMode(this.value)">
+                    <option value="auto">Auto</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="tabs workflow-tabs">
+            <div class="tab active" onclick="switchTab('initialization')">1. Initialization</div>
+            <div class="tab" onclick="switchTab('customization')">2. Customization</div>
+            <div class="tab" onclick="switchTab('export')">3. Export</div>
         </div>
-        
-        <!-- DASHBOARD -->
-        <div id="dashboard" class="tab-content active">
-            {% include 'components/dashboard.html' %}
+
+        <div id="initialization" class="tab-content active">
+            {% include 'components/initialization.html' %}
         </div>
-        
-        <!-- PACKAGES LIST -->
-        <div id="packages" class="tab-content">
-            {% include 'components/packages.html' %}
+
+        <div id="customization" class="tab-content">
+            {% include 'components/customization.html' %}
         </div>
-        
-        <!-- SEARCH -->
-        <div id="search" class="tab-content">
-            {% include 'components/search.html' %}
-        </div>
-        
-        <!-- SETTINGS -->
-        <div id="settings" class="tab-content">
-            {% include 'components/settings.html' %}
+
+        <div id="export" class="tab-content">
+            {% include 'components/export_stage.html' %}
         </div>
     </div>
 
     <!-- Scripts -->
+    <div id="global-modal-root" style="display:none"></div>
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <script src="/static/js/i18n.js"></script>
     <script src="/static/js/app.js"></script>
 </body>

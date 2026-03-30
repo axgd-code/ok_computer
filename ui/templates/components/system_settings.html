@@ -1,0 +1,13 @@
+<div class="card">
+    <div class="section-title">System Settings (Cross-OS)</div>
+    <p>Edit shared system settings by operating system. Values are stored in system_settings.conf.</p>
+
+    <div style="margin-bottom:10px; display:flex; gap:8px;">
+        <button onclick="loadSystemSettings()" class="secondary">Refresh</button>
+        <button onclick="saveSystemSettings()">Save</button>
+        <button onclick="applySystemSettings()" class="secondary">Apply on current OS</button>
+    </div>
+
+    <div id="system-settings-list">Loading...</div>
+    <pre id="system-settings-output" style="margin-top:12px; display:none;"></pre>
+</div>

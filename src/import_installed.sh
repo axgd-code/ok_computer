@@ -4,6 +4,14 @@
 # for probing remote services; treat unset variables as errors.
 set -u
 
+# Parse flags
+SKIP_CROSS_CHECK=false
+for arg in "$@"; do
+    case "$arg" in
+        --skip-cross-check) SKIP_CROSS_CHECK=true ;;
+    esac
+done
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -128,28 +136,32 @@ process_package() {
 
     if [ "$MACHINE" = "Mac" ]; then
         mac_name="$name"
-        # Try to find match on Windows
-        echo -n "  Checking duplicate on Windows... "
-        if check_chocolatey_api "$name"; then
-            win_name="$name"
-            echo "found ($name)"
-        else
-            echo "not found"
+        if [ "$SKIP_CROSS_CHECK" = "false" ]; then
+            # Try to find match on Windows
+            echo -n "  Checking duplicate on Windows... "
+            if check_chocolatey_api "$name"; then
+                win_name="$name"
+                echo "found ($name)"
+            else
+                echo "not found"
+            fi
         fi
     elif [ "$MACHINE" = "Windows" ]; then
         win_name="$name"
-        # Try to find match on Mac
-        echo -n "  Checking duplicate on macOS... "
-        if check_homebrew_api "$name" "cask"; then
-            mac_name="$name"
-            type="cask"
-            echo "found (cask)"
-        elif check_homebrew_api "$name" "brew"; then
-            mac_name="$name"
-            if [ "$type" != "cask" ]; then type="brew"; fi
-            echo "found (brew)"
-        else
-            echo "not found"
+        if [ "$SKIP_CROSS_CHECK" = "false" ]; then
+            # Try to find match on Mac
+            echo -n "  Checking duplicate on macOS... "
+            if check_homebrew_api "$name" "cask"; then
+                mac_name="$name"
+                type="cask"
+                echo "found (cask)"
+            elif check_homebrew_api "$name" "brew"; then
+                mac_name="$name"
+                if [ "$type" != "cask" ]; then type="brew"; fi
+                echo "found (brew)"
+            else
+                echo "not found"
+            fi
         fi
     fi
 
@@ -158,17 +170,28 @@ process_package() {
 }
 
 if [ "$MACHINE" = "Mac" ]; then
-    if command -v brew &>/dev/null; then
+    # Find brew executable
+    if [ -x "/opt/homebrew/bin/brew" ]; then
+        BREW="/opt/homebrew/bin/brew"
+    elif [ -x "/usr/local/bin/brew" ]; then
+        BREW="/usr/local/bin/brew"
+    else
+        BREW=""
+    fi
+    
+    if [ -n "$BREW" ]; then
         echo -e "\n${BLUE}Searching Homebrew Formulas...${NC}"
         # using leaves to avoid dependencies
-        for pkg in $(brew leaves); do
+        for pkg in $($BREW leaves); do
             process_package "$pkg" "brew" "macOS"
         done
 
         echo -e "\n${BLUE}Searching Homebrew Casks...${NC}"
-        for pkg in $(brew list --cask); do
+        for pkg in $($BREW list --cask); do
             process_package "$pkg" "cask" "macOS"
         done
+    else
+        echo "Homebrew not found."
     fi
 
     if command -v mas &>/dev/null; then

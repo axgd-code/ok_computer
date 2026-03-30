@@ -2,6 +2,13 @@
     <div class="section-title" data-i18n="maintenance">Maintenance</div>
     <p data-i18n="maintenance_desc">Run system updates (brew upgrade, update packages.conf, etc.)</p>
     <button onclick="runUpdate()" id="btn-update" data-i18n="run_update">Run Update Now</button>
+    <div style="margin-top:12px; display:flex; align-items:center; gap:8px;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#555;">
+            <input type="checkbox" id="auto-update-toggle" onchange="toggleAutoUpdate()">
+            <span data-i18n="auto_update_toggle">Automatic packages update</span>
+        </label>
+        <span id="auto-update-status" style="font-size:12px; color:#666;"></span>
+    </div>
     <div id="update-output" style="margin-top: 15px; display: none;">
         <pre id="update-log"></pre>
     </div>
@@ -12,6 +19,30 @@
     <button class="secondary" onclick="importInstalled()" data-i18n="import_installed">Import Installed Packages</button>
     <span style="font-size:12px; color:#86868b; margin-left:10px;" data-i18n="import_desc">Scans system and adds to configuration</span>
     <br><br>
+    <button class="secondary" onclick="exportConfig()" data-i18n="export_config">Export Configuration</button>
+    <span style="font-size:12px; color:#86868b; margin-left:10px;" data-i18n="export_config_desc">Create a zip with .env.local, packages and extensions</span>
+    <br><br>
     <button class="secondary" onclick="promptWifiExport()" data-i18n="export_wifi">Export Wi-Fi to KeePassXC</button>
     <span style="font-size:12px; color:#86868b; margin-left:10px;" data-i18n="export_desc">Imports local Wi-Fi passwords into a .kdbx file</span>
+    <br><br>
+    <button class="secondary" onclick="startInitFromZip()" data-i18n="init_from_zip">Initialize from zip file</button>
+    <span style="font-size:12px; color:#86868b; margin-left:10px;" data-i18n="init_from_zip_desc">Loads env, packages and extensions from configuration zip</span>
+    <div style="margin-top:12px;">
+        <div style="height:10px; background:#e9e9ee; border-radius:999px; overflow:hidden;">
+            <div id="init-progress-bar" style="height:100%; width:0%; background:#0071e3; transition:width 250ms;"></div>
+        </div>
+        <div id="init-progress-text" style="font-size:12px; color:#666; margin-top:6px;"></div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="section-title" data-i18n="dotfiles_title">Dotfiles</div>
+    <p data-i18n="dotfiles_intro">The app mirrors dotfiles.sh in manual mode: no cron is installed and nothing runs automatically in the background.</p>
+    <div id="dotfiles-panel" data-i18n="loading">Loading...</div>
+</div>
+
+<div class="card">
+    <div class="section-title" data-i18n="shared_config_title">Shared Configuration</div>
+    <p data-i18n="shared_config_desc">Sync or restore packages.conf, extensions.conf and system settings through the shared drive, then initialize a machine directly from it.</p>
+    <div id="shared-config-panel" data-i18n="loading">Loading...</div>
 </div>

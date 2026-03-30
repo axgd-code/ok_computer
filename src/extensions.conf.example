@@ -1,0 +1,17 @@
+# Browser Extensions Configuration
+# Format: BROWSER|EXTENSION_ID|DESCRIPTION
+# BROWSER: firefox, chrome, arc, all (alias for all browsers)
+# EXTENSION_ID: 
+#   - For Firefox: slug (e.g. ublock-origin)
+#   - For Chrome/Arc/All: 32-char ID (Chrome Store) | Firefox-Slug
+#   Format for 'all': CHROME_ID|FIREFOX_SLUG
+# DESCRIPTION: Just for documentation
+
+# Extensions for ALL browsers
+all|cjpalhdlnbpafiamejdnhcphjbkeiagm|ublock-origin|uBlock Origin
+
+# Firefox-specific only
+# firefox|addon-slug|Description
+
+# Chrome/Arc-specific only
+# chrome|chrome-id|Description

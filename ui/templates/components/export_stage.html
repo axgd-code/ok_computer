@@ -1,0 +1,33 @@
+<section class="hero-card compact">
+    <div>
+        <p class="eyebrow">Step 3</p>
+        <h2>Export</h2>
+        <p class="hero-copy">Package the current reference configuration into a zip file and store it in a synchronized drive folder so the next machine can be initialized from it.</p>
+    </div>
+    <div class="hero-actions">
+        <button onclick="exportConfig()" data-i18n="export_config">Export Configuration</button>
+        <button class="secondary" onclick="switchTab('initialization')">Back to initialization</button>
+    </div>
+</section>
+
+<div class="stage-grid two-col">
+    <div class="card action-card">
+        <div class="section-title">Create a Shared Backup</div>
+        <p data-i18n="export_config_desc">Create a zip with .env.local, packages and extensions</p>
+        <button onclick="exportConfig()" data-i18n="export_config">Export Configuration</button>
+        <p class="micro-copy">Choose a directory inside OneDrive, Synology Drive, Dropbox or any synchronized folder when prompted.</p>
+    </div>
+
+    <div class="card action-card">
+        <div class="section-title">Before Exporting</div>
+        <ul class="bullet-list">
+            <li>Review applications and extensions in the customization step.</li>
+            <li>Verify system settings shared across operating systems.</li>
+            <li>Check synchronized paths in the advanced settings section.</li>
+        </ul>
+        <div class="button-row wrap">
+            <button class="secondary" onclick="switchTab('customization')">Open customization</button>
+            <button class="secondary" onclick="switchTab('initialization')">Open initialization</button>
+        </div>
+    </div>
+</div>
