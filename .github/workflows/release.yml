@@ -107,22 +107,28 @@ jobs:
       - name: Archive macOS app
         if: matrix.os == 'macos-latest'
         run: |
-          mkdir -p release
-          ditto -c -k --sequesterRsrc --keepParent ui/dist/ok_computer_ui.app release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip
+          mkdir -p release staging
+          cp -R ui/dist/ok_computer_ui.app staging/
+          cp -R src staging/src
+          ditto -c -k --sequesterRsrc staging release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip
 
       - name: Archive Linux bundle
         if: matrix.os == 'ubuntu-latest'
         run: |
-          mkdir -p release
-          cd ui/dist
-          zip -qr ../../release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip ok_computer_ui
+          mkdir -p release staging
+          cp -R ui/dist/ok_computer_ui staging/
+          cp -R src staging/src
+          cd staging
+          zip -qr ../release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip .
 
       - name: Archive Windows bundle
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          Compress-Archive -Path ui/dist/ok_computer_ui/* -DestinationPath release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip -Force
+          New-Item -ItemType Directory -Force -Path release, staging | Out-Null
+          Copy-Item -Recurse ui/dist/ok_computer_ui staging/ok_computer_ui
+          Copy-Item -Recurse src staging/src
+          Compress-Archive -Path staging/* -DestinationPath release/ok_computer-ui-${{ matrix.asset_suffix }}-${{ steps.vars.outputs.tag }}.zip -Force
 
       - name: Upload UI bundle to release
         uses: softprops/action-gh-release@v2
